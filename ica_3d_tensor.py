@@ -103,7 +103,7 @@ if __name__ == "__main__":
     minimize(value_and_grad(td.objective), td.params, method='Newton-CG', 
         jac=True, callback= td.callback, options={'maxiter':25})
 
-    dump_pickle(td.params, "model_params")
+    dump_pickle(td.params, "model_params.pickle")
 
     # compute average error
     # does lambda differ across tumours, types, etc.?
