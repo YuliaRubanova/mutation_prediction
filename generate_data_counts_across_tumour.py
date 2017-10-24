@@ -77,7 +77,7 @@ def generate_training_set(vcf_list, hg19_file, trinuc, binsize):
 
 		variants_parser = VariantParser(vcf_file, hg19_file, trinuc)
 
-		mut, low_support = variants_parser.get_variants()å
+		mut, low_support = variants_parser.get_variants()
 
 		variant_features = variants_parser.get_features(mut)
 

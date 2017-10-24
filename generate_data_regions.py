@@ -16,11 +16,11 @@ import numpy as np
 ##################################################################
 
 region_size = 10**3
-maxsize_pickle = 20
-max_mut_per_tumour = 10000
+maxsize_pickle = 10
+max_mut_per_tumour = 1000
 
 DEF_FEATURE_PATH = "/home/yulia/mnt/dna_features_ryoga/"
-DEF_OUTPUT = "lsregion_dataset.regionsize" + str(region_size) + ".pickle"
+DEF_OUTPUT = "/home/yulia/mnt/mutation_prediction_data/region_dataset.regionsize" + str(region_size) + "mutTumour" + str(max_mut_per_tumour) + ".pickle"
 DEF_VCF_DIR = "/home/ryogali/data/variants/"
 DEF_VCF_FILTER = "/home/ryogali/dev/prob_model/BRCA_files.txt"
 
