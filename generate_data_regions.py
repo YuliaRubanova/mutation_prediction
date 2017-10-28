@@ -16,7 +16,7 @@ import numpy as np
 ##################################################################
 
 region_size = 10**3
-maxsize_pickle = 10
+maxsize_pickle = 1
 max_mut_per_tumour = 1000
 
 DEF_FEATURE_PATH = "/home/yulia/mnt/dna_features_ryoga/"
@@ -161,10 +161,19 @@ if __name__ =="__main__":
 		raise Exception("Please provide valid compiled feature data files.")
 
 	features= {'chromatin':chromatin, 'mRNA': mRNA}
-	
-	vcf_group_lists = get_vcfs_in_group(vcf_list, maxsize_pickle, group)
 
-	for i, vcfs in enumerate(vcf_group_lists):
+	n_pickle_files = len(vcf_list) // maxsize_pickle + 1
+
+	if group is None:
+		group = range(0, len(vcf_list) // maxsize_pickle + 1)
+	else:
+		if group > len(vcf_list) // maxsize_pickle + 1:
+			raise Exception("Group # should be between 1 and {}".format(len(vcf_list) // maxsize_pickle + 1))
+		group = [group-1]
+
+
+	for i in group:
+		vcfs = vcf_list[i * maxsize_pickle : (i+1)*maxsize_pickle]
 		output_file_part = output_file[:output_file.index(".pickle")] + ".part" + str(i+1) + ".pickle"
 
 		training_set = generate_training_set(vcfs, hg19, trinuc, features) 

@@ -227,27 +227,6 @@ def get_counts_per_bin(variant_features, interval, trinuc):
 
 	return(counts_bin)
 
-# due to large size of training set, training set is stored in several parts
-# return vcfs: list of lists of vcfs (per group)
-def get_vcfs_in_group(vcf_list, maxsize_pickle, group):
-	vcf_group_lists = []
-	output_file_list = []
-
-	n_pickle_files = len(vcf_list) // maxsize_pickle + 1
-
-	if group is None:
-		group = range(0, len(vcf_list) // maxsize_pickle + 1)
-	else:
-		if group > len(vcf_list) // maxsize_pickle + 1:
-			raise Exception("Group # should be between 1 and {}".format(len(vcf_list) // maxsize_pickle + 1))
-		group = [group-1]
-
-	for i in group:
-		vcf_group_lists.append(vcf_list[i * maxsize_pickle : (i+1)*maxsize_pickle])
-	
-	return vcf_group_lists
-
-
 
 def filter_vcfs(vcf_list, vcf_filter):
 	# filter tumors by the list provided in vcf_filter file
