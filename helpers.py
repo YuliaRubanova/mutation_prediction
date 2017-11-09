@@ -34,7 +34,6 @@ def write_output_to_file(filename, data):
 		for item in data:
 			output.write("%s\n" % item)
 
-
 def convert_onehot(one_hot_matrix):
 		"""
 		convert one hot encoding matrix back to vector
