@@ -34,7 +34,7 @@ def get_random_regions(n, region_size):
 
 	return regions
 
-def generate_random_mutations(n_random, tumour_name, n_mut_types):
+def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types):
 	tumour_names = [[tumour_name]] * n_random
 	chrom = [["rand"]] * n_random
 	pos = [[i] for i in range(n_random)]
@@ -45,22 +45,22 @@ def generate_random_mutations(n_random, tumour_name, n_mut_types):
 	chromatin = [[np.random.choice([0,1])] for i in range(n_random)]
 	transcribed = [[np.random.choice([0,1])] for i in range(n_random)]
 	strand = [[np.random.choice([0,1])] for i in range(n_random)]
-
 	strand[transcribed == 0] = [-1]
 
-	return combine_column([tumour_names, chrom, pos, vaf, mut_types, chromatin, transcribed, strand])
+	random_mutations = combine_column([tumour_names, chrom, pos, vaf, mut_types, chromatin, transcribed, strand])
+	return pd.DataFrame(random_mutations, columns = colnames)
 
-def get_counts_by_type(region_counts, mut_features, feature_header, trinuc):
-	feature_data = mut_features[:,get_col_indices_trinucleotides([feature_header], trinuc)].astype(int)
+def get_counts_by_type(region_counts, mut_features, trinuc):
+	trinuc_dict, trinuc_list = trinuc
+	feature_data = mut_features.loc[:,trinuc_list].astype(int)
 	region_counts = np.matrix(region_counts)
 
 	return np.sum(np.multiply(region_counts, feature_data), axis=1)
 
 def generate_training_set(vcf_list, hg19, trinuc, features):
-	mut_features_all = []
+	mut_features_all = pd.DataFrame() 
 	region_counts_all = []
 	region_features_all = []
-	header = []
 
 	for i, vcf_file in enumerate(vcf_list):
 		if vcf_file.endswith(".vcf"):
@@ -78,10 +78,6 @@ def generate_training_set(vcf_list, hg19, trinuc, features):
 		np.random.shuffle(mut)
 
 		mut_features = variants_parser.get_features(mut[:max_mut_per_tumour], tumour_name)
-
-		header = mut_features[0]
-		mut_features_data = mut_features[1:]
-
 		mut_regions = variants_parser.get_region_around_mutation(mut[:max_mut_per_tumour], region_size)
 
 		# region_counts -- counts of mutations there are in the regions that we selected
@@ -89,15 +85,21 @@ def generate_training_set(vcf_list, hg19, trinuc, features):
 		region_counts, region_features = variants_parser.get_region_features(mut_regions, mut_features)
 
 		# take only region counts that correspond to the asked mutation type
-		region_counts = get_counts_by_type(region_counts, mut_features_data, header, trinuc)
+		region_counts = get_counts_by_type(region_counts, mut_features, trinuc)
 
-		mut_features_all.extend(mut_features_data)
+		print(region_counts)
+		print(region_counts.shape)
+		exit()
+
+
+		mut_features_all = pd.concat([mut_features_all, mut_features])
+
 		region_counts_all.extend(region_counts)
 		region_features_all.extend(region_features)
 
 		n_random = len(region_counts) //2
 		print("Generating " + str(n_random) + " random regions")
-		mut_features_random = generate_random_mutations(n_random, tumour_name, n_mut_types = len(trinuc[1]))
+		mut_features_random = generate_random_mutations(n_random, tumour_name,  mut_features.columns.values, n_mut_types = len(trinuc[1]))
 
 		# generate the same number of random regions as there are true regions.
 		random_regions = get_random_regions(n_random,region_size)
@@ -105,18 +107,15 @@ def generate_training_set(vcf_list, hg19, trinuc, features):
 		region_counts_random, region_features_random = variants_parser.get_region_features(random_regions, mut_features)
 
 		# take only region counts that correspond to the asked mutation type
-		region_counts_random = get_counts_by_type(region_counts_random, mut_features_random, header, trinuc)
+		region_counts_random = get_counts_by_type(region_counts_random, mut_features_random, trinuc)
 
-		mut_features_all.extend(mut_features_random)
+		mut_features_all = pd.concat([mut_features_all, mut_features_random])
+
 		region_counts_all.extend(region_counts_random)
 		region_features_all.extend(region_features_random)
 
 		print("DONE-{}".format(tumour_name))
 
-	mut_features_all = np.concatenate(([header], mut_features_all))
-
-
-	mut_features_all = np.matrix(mut_features_all)
 	region_counts_all = np.squeeze(np.array(region_counts_all))
 	region_features_all = np.array(region_features_all)
 
@@ -177,6 +176,7 @@ if __name__ =="__main__":
 		output_file_part = output_file[:output_file.index(".pickle")] + ".part" + str(i+1) + ".pickle"
 
 		training_set = generate_training_set(vcfs, hg19, trinuc, features) 
+
 		dump_pickle(training_set, output_file_part)
 		
 		print("DONE! Dataset {} created.".format(output_file_part))

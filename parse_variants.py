@@ -3,7 +3,7 @@
 #v2.1
 from __future__ import division
 from sklearn.model_selection import KFold
-import vcf
+import vcf # pip3 install pyvcf
 import numpy as np
 from helpers import *
 
@@ -218,15 +218,27 @@ class VariantParser(object):
 		if tumour_name:
 			feature_matrix = combine_column([ add_colname([tumour_name] * len(mut_list), "Tumour"), feature_matrix])
 		
+		feature_matrix = np.array(feature_matrix)
+		feature_matrix = pd.DataFrame(feature_matrix[1:], columns = feature_matrix[0])
+
 		return feature_matrix
-
-
 
 	def get_region_around_mutation(self, mut, region_size):
 		regions = []
 		for i, record in enumerate(mut):
 			chrom = "chr" + str(record.CHROM)
 			position = record.POS 
+			start, end = max(0,position - region_size//2), min(position + region_size//2, chromosome_lengths[chrom])
+			regions.append((chrom, start, end))
+		return regions
+
+	def get_region_around_mutation_from_features(self, mut_feature_array, region_size):
+		regions = []
+
+		for i, record in enumerate(mut_feature_array):
+			chrom = record['Chr'].values[0]
+			position = int(record['Pos'])
+
 			start, end = max(0,position - region_size//2), min(position + region_size//2, chromosome_lengths[chrom])
 			regions.append((chrom, start, end))
 		return regions

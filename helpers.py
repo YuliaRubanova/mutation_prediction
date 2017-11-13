@@ -1,8 +1,8 @@
-#!/usr/bin/python
 # coding=utf-8
 
 import pickle
 import numpy as np
+import pandas as pd
 
 def load_pickle(filename):
 	with open(filename, 'rb') as pkl_file:
@@ -33,7 +33,6 @@ def write_output_to_file(filename, data):
 	with open(filename, "w") as output:
 		for item in data:
 			output.write("%s\n" % item)
-
 
 def convert_onehot(one_hot_matrix):
 		"""
@@ -203,26 +202,32 @@ def fill_data_for_region(interval, sorted_region_list, func_fill_data = fill_bin
 def get_col_indices_trinucleotides(variant_features, trinuc):
 	trinuc_dict, trinuc_list = trinuc
 
-	colnames = list(variant_features[0])	
+	if not isinstance(variant_features, pd.DataFrame) and not isinstance(variant_features, pd.Series):
+		raise("ERROR: variant_features is not a pandas dataframe")
+		
+	colnames = list(variant_features.columns.values)
 	return([colnames.index(tr) for tr in trinuc_list])
 
 
 def get_counts_per_bin(variant_features, interval, trinuc):
 	chrom, start, end = interval
 
+	if not isinstance(variant_features, pd.DataFrame) and not isinstance(variant_features, pd.Series):
+		raise("ERROR: variant_features is not a pandas dataframe")
+
 	trinuc_indices = get_col_indices_trinucleotides(variant_features, trinuc)
 
-	chr_column = int(np.where(variant_features[0,] ==  'Chr')[0])
-	pos_column = int(np.where(variant_features[0,] ==  'Pos')[0])
+	chr_column = int(np.where(variant_features.columns.values ==  'Chr')[0])
+	pos_column = int(np.where(variant_features.columns.values ==  'Pos')[0])
 
-	variants_chr = variant_features[variant_features[:,chr_column] == chrom,:]
-	pos = variants_chr[:,pos_column].astype(int)
+	variants_chr = variant_features[variant_features.Chr == chrom]
+	pos = int(variants_chr.Pos.values[0]) # check how this works with multiple regions !!!!
 
 	counts_bin = [0] * len(trinuc_indices)
 	pos_bin = np.where((pos >= start) & (pos <= end))[0]
 
 	if len(pos_bin) != 0:
-		variants_bin =  np.array(variants_chr[pos_bin,:])
+		variants_bin =  np.array(variants_chr)[pos_bin,:]
 		counts_bin = np.sum(variants_bin[:,trinuc_indices].astype(int), axis = 0)
 
 	return(counts_bin)
@@ -234,3 +239,15 @@ def filter_vcfs(vcf_list, vcf_filter):
 		filter = [x.strip("\"\"\n") for x in file.read().splitlines()]
 	vcf_list = [x for x in vcf_list if x.split(".")[0] in filter]
 	return vcf_list
+
+
+def filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids):
+	# take a subset of tumours, if needed
+	unique_tumours = unique_tumours[tumor_ids]
+	samples_to_use = [x in tumor_ids for x in x_tumour_ids]
+
+	training_set = training_set[samples_to_use]
+	labels = labels[samples_to_use]
+	x_tumour_ids = x_tumour_ids[samples_to_use]
+
+	return training_set, labels, unique_tumours, x_tumour_ids

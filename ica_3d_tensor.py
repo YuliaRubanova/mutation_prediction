@@ -16,15 +16,15 @@ import argparse
 import pickle
 import os
 
-# count_dataset_path = ["/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part1.pickle",
-#                         "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part2.pickle",
-#                         "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part3.pickle",
-#                          "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part4.pickle",
-#                           "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part5.pickle",
-#                            "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part6.pickle"]
+count_dataset_path = ["/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part1.pickle",
+                         "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part2.pickle",
+                         "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part3.pickle",
+                          "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part4.pickle",
+                           "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part5.pickle",
+                            "/home/yulia/mnt/mutation_prediction_data/tumour_mutation_counts_dataset.part6.pickle"]
 
-count_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/tumour_mutation_counts_dataset.small.pickle"]
-model_params_file = "trained_models/model.mut_counts.lat{}.loss_{}.small.pickle"
+#count_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/tumour_mutation_counts_dataset.small.pickle"]
+model_params_file = "trained_models/model.mut_counts.lat{}.loss_{}.pickle"
 
 def load_pickle(filename):
     with open(filename, 'rb') as pkl_file:
@@ -80,10 +80,10 @@ class tensorDecomposition():
 
     def logprob(self, params):
         if loss_type == "poisson":
-            prob_mass = poisson_pmf(self.data, self.get_lambda(params))
+            prob_mass = poisson_pmf(self.data, self.get_lambda(params)) /  self.dimensions['sample'] / self.dimensions['region'] / self.dimensions['type']
         else:
             prob_mass = -np.sqrt(np.sum((self.data - np.exp(self.get_lambda(params)))**2))
-        return np.sum(prob_mass) /  self.dimensions['sample'] / self.dimensions['region'] / self.dimensions['type']
+        return np.sum(prob_mass) 
 
     def callback(self, params):
         self.iter += 1
@@ -114,7 +114,6 @@ if __name__ == "__main__":
 
     print("Loading dataset...")
     data, tumour_names = load_dataset(count_dataset_path)
-    data = data[:10]
 
     if n_tumours is not None:
         data = data[:int(n_tumours),:,:]
