@@ -1,0 +1,28 @@
+predict_mutation_rate_dynamic_annotation.py -- predict binary label from mutation type and region features. Training set contains only mutation features -- mutation position, type and features at mutation position. Region features are generated dynamically when needed.
+
+generate_data_counts_across_tumour.py -- generate dataset of mutation position + mutation type. Binary label if it is a true mutation or not. 
+
+get_region_features.py -- helper file for dynamically loading region annotation for the mutation_only datasets
+
+============================================================
+
+predict_mutation_rate.py -- predict binary label from mutation type and region features. Works on the dataset where region features are already provided for each mutation in a dataset file.
+
+generate_data_regions.py -- generate mutation type + region feature dataset with binary label (if mutation occurred in region with this annotation or not)
+
+============================================================
+
+ica_3d_tensor.py -- input: 3-d tensor of mutation counts (tumour, 1-Mb region, mutation type). We decompose it to the 3 types of latents: tumour, region and mutation type. Loss: Poisson likelihood on sum of latents
+
+ica_3d_tensor_neural_net_lambda.py -- Poisson model as in ica_3d_tensor.py, just with a neural net for predicting Poisson intensity lambda -- does not work with autograd
+
+generate_data_counts_across_tumour.py -- generate mutation counts for ica_3d_tensor.py model
+
+============================================================
+primitives.py -- basic tensorflow structures
+
+parse_variants.py -- helper file. Contains VariantParser class to get variants and annotation for them
+
+read_files.py -- read DNA annotation files, such as mRNA and chromatin
+
+helpers.py -- different helper functions

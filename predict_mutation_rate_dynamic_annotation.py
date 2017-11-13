@@ -12,6 +12,8 @@ from primitives import *
 from sklearn import model_selection
 import os
 import numpy as np
+from get_annotation_for_mutation_regions import *
+import pandas as pd
 import glob
 
 from tensorflow.examples.tutorials.mnist import input_data
@@ -20,8 +22,12 @@ import tensorflow as tf
 
 FLAGS = None
 
+region_size = 10**3
+
+DEF_FEATURE_PATH = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
+
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
-dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000mutTumour1000.part1.pickle"]
+dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part1.pickle"]
 
 feature_path = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.ckpt"
@@ -34,14 +40,13 @@ def load_dataset(dataset_path, n_parts = 1000):
 	if len(paths) == 0:
 		raise Exception("No dataset provided")
 
-	mut_features, region_counts, region_features = load_pickle(paths[0])
+	mut_features, region_counts = load_pickle(paths[0])
 
 	for path in paths[1:n_parts]:
-		mutf, counts, regf = load_pickle(path)
+		mutf, counts = load_pickle(path)
 		mut_features = pd.concat([mut_features, mutf])
 		region_counts = np.concatenate((region_counts, counts))
-		region_features = np.concatenate((region_features, regf))
-	return mut_features, region_counts, region_features
+	return mut_features, region_counts
 
 def correct_predictions(predictions, y_):
 	predictions_binary = tf.cast(tf.less(tf.constant(0.5), predictions),tf.int64) # gaussian
@@ -63,7 +68,7 @@ def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent
 		# b_fc1 = bias_variable([reg_latent_dim])
 		# y_region = tf.matmul(X, W_fc1) + b_fc1
 
-		prob_nn = init_neural_net_params([x_dim, 50, 50, reg_latent_dim])
+		prob_nn = init_neural_net_params([x_dim, 500, 100, 100, reg_latent_dim])
 		y_region = neural_net(X, prob_nn['weights'], prob_nn['biases'])
 
 	z_t = tf.squeeze(tf.gather_nd(tumour_latents, x_tumour_ids))
@@ -126,28 +131,29 @@ def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim, 
 	return p, z_t, y_region, cross_entropy, accuracy, predictions
 
 
-def make_training_set(mut_features, region_counts, region_features, trinuc):
+def make_training_set(mut_features, region_counts, trinuc, feature_path, region_size):
 	mut_features = mut_features.reset_index(drop=True)
-	
-	region_features = region_features[:,1:]
-
-	if not(mut_features.shape[0] == region_counts.shape[0] and region_counts.shape[0] == region_features.shape[0]):
-		raise Exception("Dataset is incorrect: all parts should contain the same number of samples")
 
 	mut_annotation = mut_features.iloc[:,:3]
 	tumour_names = np.asarray(mut_annotation.Tumour).ravel()
 	unique_tumours = np.unique(tumour_names)
-	tumour_ids = np.squeeze(np.asarray([np.where(unique_tumours ==name) for name in tumour_names]))[:,np.newaxis]
+	tumour_ids = np.squeeze(np.asarray([np.where(unique_tumours == name) for name in tumour_names]))[:,np.newaxis]
 	
 	trinuc_dict, trinuc_list = trinuc
 	mut_types = mut_features.loc[:,trinuc_list]
+
+	region_features = get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size)
+	region_features = region_features[:,1:]
+
+	if not(mut_features.shape[0] == region_counts.shape[0] and region_counts.shape[0] == region_features.shape[0]):
+		raise Exception("Dataset is incorrect: all parts should contain the same number of samples")
 
 	n_samples = mut_features.shape[0]
 	regionsize = region_features.shape[1]
 	n_region_features = region_features.shape[2]
 	n_mut_types = mut_types.shape[1]
 
-	region_features = region_features.reshape((n_samples, regionsize * n_region_features))
+	region_features = region_features.reshape((n_samples, regionsize*n_region_features))
 	region_counts = region_counts[:,np.newaxis]
 
 	dataset = np.concatenate((mut_types, region_features), axis=1)
@@ -230,6 +236,8 @@ if __name__ == '__main__':
 	parser.add_argument('-b','--batch', help='batch size', default=500)
 	parser.add_argument('--model', help='Model type: gaussian likelihood or neural net', default='gaussian')
 	#parser.add_argument('--loss', help = "loss type: poisson or mean_squared", default="poisson")
+	parser.add_argument('-f', '--feature-path', help='feature file path', default=DEF_FEATURE_PATH)
+	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=1000,type=int)
 
 	args = parser.parse_args()
 	test_mode = args.test
@@ -238,18 +246,20 @@ if __name__ == '__main__':
 	n_epochs = int(args.epochs)
 	batch_size = int(args.batch)
 	model_type = args.model
+	feature_path = args.feature_path
+	region_size = args.region_size
 	#latent_dimension = args.latents
 
 	# model params
-	reg_latent_dim = 50
+	reg_latent_dim = 20
 	prob_neural_net = [200, 200, 1]
 	z_latent_dim = reg_latent_dim * 2
 
 	print("Loading dataset...")
-	mut_features, region_counts, region_features = load_dataset(dataset_path)
+	mut_features, region_counts = load_dataset(dataset_path)
 	trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
 
-	training_set, labels, unique_tumours, x_tumour_ids = make_training_set(mut_features, region_counts, region_features, trinuc)
+	training_set, labels, unique_tumours, x_tumour_ids = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size)
 
 	if n_tumours is not None:
 		tumor_ids = list(range(int(n_tumours)))

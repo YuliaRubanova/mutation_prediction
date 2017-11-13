@@ -134,7 +134,7 @@ if __name__ == "__main__":
         print("Optimizing...")
         init_params = rs.randn(num_latent_params)
 
-        minimize(value_and_grad(td.objective), td.params, method='Newton-CG', 
+        minimize(value_and_grad(td.objective), td.params, method='BFGS', 
             jac=True, callback= td.callback, options={'maxiter':100})
 
         dump_pickle(np.array(td.params), model_params_file)
@@ -187,12 +187,8 @@ if __name__ == "__main__":
         print(type_latents)
 
         #compare sample and region latents
-        #experiments with diff latent dimentions
         #can it overfit?
-
-    # compute average error
-    # does lambda differ across tumours, types, etc.?
-    # make training and test sets
-    # predict lambda for new tumour, region
+        # make training and test sets
+        # predict lambda for new tumour, region
 
 
