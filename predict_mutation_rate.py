@@ -12,6 +12,7 @@ from primitives import *
 from sklearn import model_selection
 import os
 import numpy as np
+import glob
 
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -20,20 +21,23 @@ import tensorflow as tf
 FLAGS = None
 
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
-dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000mutTumour.1tumour.part1.pickle",
-					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000mutTumour.1tumour.part2.pickle"]
+dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000mutTumour.1tumour.part*.pickle"]
 
 feature_path = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.ckpt"
 
 def load_dataset(dataset_path, n_parts = 1000):
-    mut_features, region_counts, region_features = load_pickle(dataset_path[0])
-    for path in dataset_path[1:n_parts]:
-        mutf, counts, regf = load_pickle(path)
-        mut_features = np.concatenate((mut_features, mutf[1:])) # the first row is annotation
-        region_counts = np.concatenate((region_counts, counts))
-        region_features = np.concatenate((region_features, regf))
-    return mut_features, region_counts, region_features
+	paths = []
+	for p in dataset_path:
+		paths.extend(glob.glob(p))
+
+	mut_features, region_counts, region_features = load_pickle(paths[0])
+	for path in paths[1:n_parts]:
+		mutf, counts, regf = load_pickle(path)
+		mut_features = np.concatenate((mut_features, mutf)) # the first row is annotation
+		region_counts = np.concatenate((region_counts, counts))
+		region_features = np.concatenate((region_features, regf))
+	return mut_features, region_counts, region_features
 
 def filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids):
 	# take a subset of tumours, if needed
@@ -131,7 +135,10 @@ def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim, 
 
 def make_training_set(mut_features, region_counts, region_features, trinuc):
 	feature_names = np.asarray(mut_features[0]).ravel()
-	mut_features = mut_features[1:]
+
+	mut_features = np.array(mut_features)
+	mut_features = pd.DataFrame(mut_features[1:], columns = mut_features[0])
+	
 	region_features = region_features[:,1:]
 
 	if not(mut_features.shape[0] == region_counts.shape[0] and region_counts.shape[0] == region_features.shape[0]):
@@ -250,6 +257,12 @@ if __name__ == '__main__':
 	print("Loading dataset...")
 	mut_features, region_counts, region_features = load_dataset(dataset_path)
 	trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
+
+	print(mut_features.shape)
+	print(region_counts.shape)
+	print(region_features.shape)
+	print(mut_features[:10])
+	exit()
 
 	training_set, labels, unique_tumours, x_tumour_ids = make_training_set(mut_features, region_counts, region_features, trinuc)
 
