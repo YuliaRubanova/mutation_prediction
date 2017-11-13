@@ -4,7 +4,7 @@
 
 # save feature files into pickle files to reduce runtime
 from __future__ import division
-from Bio import SeqIO
+from Bio import SeqIO # pip3 install biopython
 import numpy as np
 import pickle
 import argparse
