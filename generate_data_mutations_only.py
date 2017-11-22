@@ -47,7 +47,7 @@ def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types):
 	n_other_features = len(colnames) - random_mutations.shape[1]
 	other_features = np.random.uniform(size=(n_random, n_other_features))
 	random_mutations = combine_column([random_mutations, other_features])
-
+	
 	return pd.DataFrame(random_mutations, columns = colnames)
 
 def generate_training_set(vcf_list, hg19, trinuc, features_chromatin_mRNA, other_features):

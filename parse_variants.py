@@ -176,7 +176,6 @@ class VariantParser(object):
 
 			if self.other_features:
 				mut_feature_data = []
-				other_feature_names = self.other_features.keys()
 				for feature_name in self.other_features.keys():
 					feature_dict = sorted(self.other_features[feature_name][chromosome])
 					found_region = Variant.find_variant_in_region(record, feature_dict)
@@ -231,8 +230,7 @@ class VariantParser(object):
 		if self.other_features:
 			other_feature_data = np.squeeze(np.array(other_feature_data))
 			other_feature_data = add_colname(other_feature_data, list(self.other_features.keys()))
-			feature_matrix = combine_column([feature_matrix,other_feature_data])
-
+			feature_matrix = combine_column([feature_matrix, other_feature_data])
 	
 		if (compute_signatures):
 			se = add_colname(se, "Exposure")
