@@ -11,7 +11,7 @@ import argparse
 import os
 import shutil
 
-feature_data = "./"
+feature_data = "/home/yulia/mnt/dna_features_ryoga/"
 
 def read_psub(filename):
 	"""
@@ -65,6 +65,23 @@ def read_chromatin(filename):
 	with open(feature_data+"chromatin"+".pickle", 'wb') as handle:
 		pickle.dump(output, handle, protocol=2)
 
+def read_data_1000scale(filename, save_to):
+	"""
+	Read a file and and convert the 5th coumn into scale 0-1
+	"""
+	output = {}
+	with open(filename, "r") as input_file:
+		for line in input_file:
+			line = line.split()
+			chrom = line[0]
+			if chrom not in output.keys():
+				output[chrom] = []
+			start_pos = line[1]
+			end_pos = line[2]
+			score = line[4]
+			output[chrom].append((int(start_pos), int(end_pos), float(score)/1000.0))
+	with open(save_to, 'wb') as handle:
+		pickle.dump(output, handle, protocol=2)
 
 def read_tri(trinucleotide):
 	"""
@@ -193,15 +210,19 @@ if __name__ == '__main__':
 	#/home/q/qmorris/ryogali/data/trinucleotide.txt
 	parser.add_argument('-c', '--chromatin', help='Chromatin file, cancer type specific', required=False)
 	#/home/q/qmorris/ryogali/data/ENCFF001UVV.bed
+	parser.add_argument('-o', '--other', help='Folder with histone marks, methylation, etc., cancer type specific', required=False)
+	#/home/yulia/mnt/mutation_prediction_data/breast/
+	
 	args = parser.parse_args()
 
 	mRNA_file = args.mRNA
 	trinuc = args.trinucleotide
 	alex_signature_file = args.Signatures
 	hg19_file = args.humanGenome
+	other_data_folder = args.other
 
 	chromatin_file = args.chromatin
-	feature_data = "/home/ryogali/data/features/"
+	
 	if not os.path.exists(feature_data):
 		os.makedirs(feature_data)
 	else:
@@ -214,6 +235,9 @@ if __name__ == '__main__':
 	read_hg19(hg19_file)
 	if args.chromatin:
 		read_chromatin(chromatin_file)
+
+	for file in os.listdir(other_data_folder):
+		read_data_1000scale(os.path.join(other_data_folder,file), os.path.join(feature_data,file + ".pickle"))
 
 	print("Processed feature files are saved into: " + feature_data)
 	print([i for i in os.listdir(feature_data)])

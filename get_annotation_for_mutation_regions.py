@@ -39,25 +39,32 @@ def load_annotation(feature_path):
 		#alex_signature_file = load_npy(os.path.join(feature_path,"signature.npy"))
 		hg19 = load_pickle(os.path.join(feature_path,"hg.pickle"))
 		chromatin = load_pickle(os.path.join(feature_path, "chromatin.pickle"))
+		
+		other_features = {}
+		for file in os.listdir(feature_path):
+			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
+				continue
+			other_features[file[:-len(".pickle")]] = load_pickle(os.path.join(feature_path, file))
 	except Exception as error:
 		raise Exception("Please provide valid compiled feature data files.")
 
-	features= {'chromatin':chromatin, 'mRNA': mRNA}
-	return features, hg19
+	features_chromatin_mRNA= {'chromatin':chromatin, 'mRNA': mRNA}
+
+	return features_chromatin_mRNA, other_features, hg19
 
 def get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size):
 	n_samples = mut_features.shape[0]
 	region_features_all = [None] * mut_features.shape[0]
 	region_counts_all = [None] * mut_features.shape[0]
 
-	annotation, hg19 = load_annotation(feature_path)
+	features_chromatin_mRNA, other_features, hg19 = load_annotation(feature_path)
 
 	print("Loading annotations for regions for " + str(n_samples) + " mutations...")
 	t = time.time()
 
 	for i, m in mut_features.iterrows():
 		mut = pd.DataFrame(m.to_frame().transpose(), columns = mut_features.columns.values)
-		counts_features = get_annotation_for_mutation_regions_one(mut, trinuc, annotation, hg19, region_size)
+		counts_features = get_annotation_for_mutation_regions_one(mut, trinuc, features_chromatin_mRNA, other_features, hg19, region_size)
 		region_counts_all[i], region_features_all[i] = counts_features
 
 	print("Annotation loaded. Time elapsed: " + str(time.time()-t) + ". Per mutation: " + str((time.time()-t) / float(n_samples)))
@@ -65,13 +72,14 @@ def get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, regi
 	region_counts_all = np.squeeze(np.array(region_counts_all))
 	region_features_all = np.squeeze(np.array(region_features_all), axis=1)
 
-	return region_features_all
+	return region_features_all, region_counts_all
 
-def get_annotation_for_mutation_regions_one(mut, trinuc, annotation, hg19, region_size):
+def get_annotation_for_mutation_regions_one(mut, trinuc, features_chromatin_mRNA, other_features, hg19, region_size):
 	tumour_name = mut['Tumour']
 
 	variants_parser = VariantParser(tumour_name, hg19, trinuc,
-		chromatin_dict = annotation['chromatin'], mrna_dict = annotation['mRNA'])
+		chromatin_dict = features_chromatin_mRNA['chromatin'], mrna_dict = features_chromatin_mRNA['mRNA'],
+		other_features = other_features)
 
 	mut_regions = variants_parser.get_region_around_mutation_from_features([mut], region_size)
 	

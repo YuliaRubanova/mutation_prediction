@@ -1,0 +1,27 @@
+Region annotation for breast tissue
+
+Open/closed chromatin (DNase-seq)
+https://genome.ucsc.edu/cgi-bin/hgFileUi?db=hg19&g=wgEncodeAwgDnaseUniform
+https://genome.ucsc.edu/cgi-bin/hgTrackUi?db=hg19&g=wgEncodeOpenChromDnase
+Cell lines HMEC, MCF-7, T-47D
+
+Transcribed/Not transcribed (RNA-seq)
+Didn't find breast-specific
+https://genome.ucsc.edu/cgi-bin/hgTrackUi?hgsid=644719719_QPKC32xdQWkPV2vlGv4sWoI8Nwwh&g=mrna&hgTracksConfigPage=configure
+
+Transcription factor binding (CHIP-seq)
+https://genome.ucsc.edu/cgi-bin/hgTrackUi?hgsid=644719571_BoJfn6VKmCPTOzIDTWyE6TyUsHzJ&c=chr1&g=wgEncodeAwgTfbsUniform
+https://genome.ucsc.edu/cgi-bin/hgFileUi?db=hg19&g=wgEncodeAwgTfbsUniform
+Cell lines HMEC, MCF-7, T-47D
+
+Methylation
+https://genome.ucsc.edu/cgi-bin/hgTrackUi?hgsid=612716079_eUpHxH9bMhaaZKYHi3q3aoKF9LdC&c=chr1&g=wgEncodeHaibMethyl450
+Cell lines HMEC, MCF-7, T-47D
+
+Histone marks:
+Samples E027 and E028
+http://egg2.wustl.edu/roadmap/web_portal/processed_data.html#ChipSeq_DNaseSeq (peak calling secion)
+http://egg2.wustl.edu/roadmap/data/byFileType/peaks/consolidated/narrowPeak/
+http://egg2.wustl.edu/roadmap/data/byFileType/peaks/consolidated/broadPeak/
+
+

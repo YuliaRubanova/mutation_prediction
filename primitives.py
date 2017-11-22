@@ -79,9 +79,9 @@ def weight_variable(shape, mean = 0.0, stddev=0.1):
 	return tf.Variable(initial)
 
 
-def bias_variable(shape):
+def bias_variable(shape, value=0.1):
 	"""bias_variable generates a bias variable of a given shape."""
-	initial = tf.constant(0.1, shape=shape)
+	initial = tf.constant(value, shape=shape)
 	return tf.Variable(initial)
 
 def unpack_gaussian(x, dim):
@@ -113,7 +113,7 @@ def neural_net(data, weights, biases):
 	x = data
 	for w,b in list(zip(weights, biases))[:-1]:
 		x = tf.nn.relu(tf.matmul(x, w) + b)
-		#layer = tf.tanh(tf.matmul(x, w) + b)
+		#x = tf.tanh(tf.matmul(x, w) + b)
 
 	# add softmax?? !!! #tf.nn.softmax(
 	output = tf.matmul(x, weights[-1]) + biases[-1]

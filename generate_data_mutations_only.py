@@ -42,7 +42,7 @@ def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types):
 	random_mutations = combine_column([tumour_names, chrom, pos, vaf, mut_types, chromatin, transcribed, strand])
 	return pd.DataFrame(random_mutations, columns = colnames)
 
-def generate_training_set(vcf_list, hg19, trinuc, features):
+def generate_training_set(vcf_list, hg19, trinuc, features_chromatin_mRNA, other_features):
 	mut_features_all = pd.DataFrame()
 	region_counts_all = []
 	header = []
@@ -57,7 +57,8 @@ def generate_training_set(vcf_list, hg19, trinuc, features):
 		print("Tumor name: {} ({}/{})".format(tumour_name, i, len(vcf_list)))
 
 		variants_parser = VariantParser(vcf_file, hg19, trinuc,
-			chromatin_dict = features['chromatin'], mrna_dict = features['mRNA'])
+			chromatin_dict = features_chromatin_mRNA['chromatin'], mrna_dict = features_chromatin_mRNA['mRNA'],
+			other_features = other_features)
 
 		mut, low_support = variants_parser.get_variants()
 		np.random.shuffle(mut)
@@ -118,10 +119,17 @@ if __name__ =="__main__":
 		#alex_signature_file = load_npy(os.path.join(feature_path,"signature.npy"))
 		hg19 = load_pickle(os.path.join(feature_path,"hg.pickle"))
 		chromatin = load_pickle(os.path.join(feature_path, "chromatin.pickle"))
+
+		features_chromatin_mRNA= {'chromatin':chromatin, 'mRNA': mRNA}
+
+		other_features = {}
+		for file in os.listdir(feature_path):
+			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
+				continue
+			other_features[file] = load_pickle(os.path.join(feature_path, file))
+
 	except Exception as error:
 		raise Exception("Please provide valid compiled feature data files.")
-
-	features= {'chromatin':chromatin, 'mRNA': mRNA}
 
 	n_pickle_files = len(vcf_list) // maxsize_pickle + 1
 
@@ -137,7 +145,7 @@ if __name__ =="__main__":
 		vcfs = vcf_list[i * maxsize_pickle : (i+1)*maxsize_pickle]
 		output_file_part = output_file[:output_file.index(".pickle")] + ".part" + str(i+1) + ".pickle"
 
-		training_set = generate_training_set(vcfs, hg19, trinuc, features) 
+		training_set = generate_training_set(vcfs, hg19, trinuc, features_chromatin_mRNA, other_features) 
 
 		dump_pickle(training_set, output_file_part)
 		

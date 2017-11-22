@@ -128,7 +128,7 @@ def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim, 
 
 def make_training_set(mut_features, region_counts, region_features, trinuc):
 	mut_features = mut_features.reset_index(drop=True)
-	
+
 	region_features = region_features[:,1:]
 
 	if not(mut_features.shape[0] == region_counts.shape[0] and region_counts.shape[0] == region_features.shape[0]):
@@ -187,6 +187,8 @@ def make_model(x_dim, unique_tumours, z_latent_dim, model_type, model_save_path)
 
 def train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path):
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
+	x_train, y_train, x_tumour_ids_train = train_data
+	train_dict = {x: x_train, y_: y_train, x_tumour_ids: x_tumour_ids_train}
 
 	with tf.Session() as sess:
 		sess.run(tf.global_variables_initializer())
@@ -200,6 +202,7 @@ def train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path)
 					train_cross_entropy = cross_entropy.eval(feed_dict=batch_dict)
 					print('Epoch %d.%d: training cross_entropy %g' % (j, i, train_cross_entropy))
 					print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
+					print('train accuracy %g' % accuracy.eval(feed_dict=train_dict))
 					print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
 					#print((tf.sigmoid(log_y_prediction)).eval(feed_dict=test_dict).ravel()[:10]) #neural net
 					print((tf.sigmoid(log_y_prediction)).eval(feed_dict=test_dict).ravel()[:10])

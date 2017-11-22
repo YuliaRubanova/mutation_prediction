@@ -37,7 +37,10 @@ chromosome_lengths = {
 
 class VariantParser(object):
 
-	def __init__(self, filename, hg, trinuc, time_points = None, chromatin_dict = None, mrna_dict = None, alex_sig = None, signatures = None):
+	def __init__(self, filename, hg, trinuc, time_points = None, 
+		chromatin_dict = None, mrna_dict = None, alex_sig = None, signatures = None,
+		other_features = None):
+
 		self.filename = filename
 		self.chromatin_dict = chromatin_dict
 		self.mrna_dict = mrna_dict
@@ -46,6 +49,7 @@ class VariantParser(object):
 		self.time_points = time_points # mixture file
 		self.alex_sig = alex_sig
 		self.signatures = signatures
+		self.other_features = other_features
 
 	def get_variants(self):
 		"""
@@ -124,6 +128,7 @@ class VariantParser(object):
 		chromatin = [None] * len(mut_list)
 		trans_region = [None] * len(mut_list)
 		sense = [None] * len(mut_list)
+		other_feature_data = [None] * len(mut_list)
 		mut_type = [None] * len(mut_list)
 		VAF_list = [None] * len(mut_list)
 		se = []
@@ -167,6 +172,17 @@ class VariantParser(object):
 					trans_region[i] = 0
 					sense[i] = -1
 
+			if self.other_features:
+				mut_feature_data = []
+				other_feature_names = self.other_features.keys()
+				for feature in self.other_features.keys():
+					found_region = Variant.find_variant_in_region(record, self.chromatin_dict[chromosome])
+					if found_region:
+						mut_feature_data.append(found_region[2])
+					else:
+						mut_feature_data.append(0)
+				other_feature_data[i] = mut_feature_data
+
 			mut_type[i] = Variant.get_trinucleotide_one_hot(record, self.hg, self.trinuc)
 
 			VAF = float(record.INFO["VAF"])
@@ -208,6 +224,10 @@ class VariantParser(object):
 			trans_region = add_colname(trans_region, "Transcribed")
 			sense = add_colname(sense, "Strand")
 			feature_matrix = combine_column([feature_matrix, trans_region, sense])
+
+		if self.other_features:
+			other_feature_data = add_column(other_feature_data, other_feature_names)
+			feature_matrix = combine_column([feature_matrix, feature_data])
 
 		if (compute_signatures):
 			se = add_colname(se, "Exposure")
@@ -256,11 +276,16 @@ class VariantParser(object):
 			chromatin = add_colname(fill_data_for_region([start, end], chromatin_chromosome), "Chromatin")
 			mrna = add_colname(np.matrix(fill_data_for_region([start, end], mrna_chromosome, fill_mRNA)), ["Transcribed", "Strand"])
 
+			other_features = []
+			for feature_name in self.other_features.keys():
+				feature_dict = sorted(self.other_features[feature_name][chrom])
+				other_features.append(add_colname(fill_data_for_region([start, end], feature_dict, fill_real), feature_name))
+			other_features = np.transpose(np.squeeze(other_features))
+
 			# find other mutations that might fall into this region
 			counts = get_counts_per_bin(mut_features, (chrom, start, end), self.trinuc)
-
 			counts_all.append(counts)
-			features_all.append(combine_column([chromatin, mrna]))
+			features_all.append(combine_column([chromatin, mrna, other_features]))
 
 		return counts_all, features_all
 

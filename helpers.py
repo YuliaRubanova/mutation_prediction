@@ -1,8 +1,8 @@
 # coding=utf-8
-
 import pickle
 import numpy as np
 import pandas as pd
+import h5py
 
 def load_pickle(filename):
 	with open(filename, 'rb') as pkl_file:
@@ -16,16 +16,18 @@ def dump_pickle(data, filename):
 def save_to_HDF(fname, data):
 	"""Save data (a dictionary) to a HDF5 file."""
 	with h5py.File(fname, 'w') as f:
-		for key, item in data.iteritems():
-			f[key] = item
+		grp=f.create_group('alist')
+		for key, item in data.items():
+			grp.create_dataset(key,data=item.astype(float))
 
 def load_from_HDF(fname):
 	"""Load data from a HDF5 file to a dictionary."""
 	data = dict()
 	with h5py.File(fname, 'r') as f:
-		for key in f:
-			data[key] = np.asarray(f[key])
-			#print(key + ":", f[key])
+		for group in f:
+			for key in f[group]:
+				data[key] = np.asarray(f[group][key])
+				#print(key + ":", f[key])
 	return data
 
 def write_output_to_file(filename, data):
@@ -162,6 +164,8 @@ def fill_mRNA(region = None):
 
 	return [trans_region, sense]
 
+def fill_real(region = None):
+	return region[2] if region else 0
 
 def fill_binary(region = None):
 		return 1 if region else 0
@@ -195,7 +199,6 @@ def fill_data_for_region(interval, sorted_region_list, func_fill_data = fill_bin
 		for i in range(start, end+1):
 			tmp = func_fill_data(sorted_region_list[index])
 			data[i] = tmp
-
 	return data
 
 

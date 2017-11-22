@@ -22,15 +22,15 @@ import tensorflow as tf
 
 FLAGS = None
 
-region_size = 10**3
+region_size = 100 #!!!!!
 
 DEF_FEATURE_PATH = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
-dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part1.pickle"]
-
+mut_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part1.pickle"] #!!!!!
 feature_path = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.ckpt"
+dataset_with_annotation = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.region_size" + str(region_size) + ".annotation.hdf5"
 
 def load_dataset(dataset_path, n_parts = 1000):
 	paths = []
@@ -60,15 +60,8 @@ def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent
 	n_tumours = tumour_latents.get_shape()[0].value
 	tumour_latent_dim = tumour_latents.get_shape()[1].value
 
-	# region_features = X[(x_dim-97):]
-	# possible_mut_types = 
-
 	with tf.name_scope('region_latents'):
-		# W_fc1 = weight_variable([x_dim, reg_latent_dim])
-		# b_fc1 = bias_variable([reg_latent_dim])
-		# y_region = tf.matmul(X, W_fc1) + b_fc1
-
-		prob_nn = init_neural_net_params([x_dim, 500, 100, 100, reg_latent_dim])
+		prob_nn = init_neural_net_params([x_dim, 500, 200, reg_latent_dim])
 		y_region = neural_net(X, prob_nn['weights'], prob_nn['biases'])
 
 	z_t = tf.squeeze(tf.gather_nd(tumour_latents, x_tumour_ids))
@@ -77,7 +70,9 @@ def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent
 
 	dist = tf.contrib.distributions.MultivariateNormalDiag(m_t, sigma_t)
 
-	L = dist.log_prob(y_region)
+	threshold = bias_variable([1], value = -0.919*reg_latent_dim)
+
+	L = dist.log_prob(y_region) - threshold
 
 	# how to normalize across other regions and types? !!!!
 	#p = tf.minimum(L,0) #!!!!!!! 
@@ -85,7 +80,9 @@ def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent
 	log_normalizer = weight_variable([n_tumours])
 	normalize_per_sample = tf.gather_nd(log_normalizer, x_tumour_ids)
 
+	#p = tf.minimum(L,-1e-6)#!!!!
 	p = tf.minimum(L,-1e-6)
+
 	log_y_prediction = tf.reshape(p, [-1,1])
 
 	# make a different loss !!!! the loss is on the counts
@@ -102,18 +99,18 @@ def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent
 
 
 
-def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim, prob_neural_net_params):
+def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
 	n_samples = X.get_shape()[0].value
+	z_latent_dim = reg_latent_dim*2
 
 	with tf.name_scope('region_latents'):
-		W_fc1 = weight_variable([x_dim, reg_latent_dim])
-		b_fc1 = bias_variable([reg_latent_dim])
-		y_region = tf.nn.relu(tf.matmul(X, W_fc1) + b_fc1)
+		prob_nn = init_neural_net_params([x_dim, 500, 500, 700, reg_latent_dim])
+		y_region = neural_net(X, prob_nn['weights'], prob_nn['biases'])
 
 	z_t = tf.squeeze(tf.gather_nd(tumour_latents, x_tumour_ids))
 
-	prob_nn = init_neural_net_params(prob_neural_net_params)
+	prob_nn = init_neural_net_params([x_dim + z_latent_dim] + [200, 200, 1])
 
 	p = neural_net(tf.concat([X, z_t], 1), prob_nn['weights'], prob_nn['biases'])
 	log_y_prediction = tf.reshape(p, [-1,1])
@@ -142,7 +139,9 @@ def make_training_set(mut_features, region_counts, trinuc, feature_path, region_
 	trinuc_dict, trinuc_list = trinuc
 	mut_types = mut_features.loc[:,trinuc_list]
 
-	region_features = get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size)
+	# !!!! new region_counts
+	region_features, rc = get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size)
+
 	region_features = region_features[:,1:]
 
 	if not(mut_features.shape[0] == region_counts.shape[0] and region_counts.shape[0] == region_features.shape[0]):
@@ -152,28 +151,27 @@ def make_training_set(mut_features, region_counts, trinuc, feature_path, region_
 	regionsize = region_features.shape[1]
 	n_region_features = region_features.shape[2]
 	n_mut_types = mut_types.shape[1]
+	n_unique_tumours = len(unique_tumours)
 
 	region_features = region_features.reshape((n_samples, regionsize*n_region_features))
 	region_counts = region_counts[:,np.newaxis]
 
 	dataset = np.concatenate((mut_types, region_features), axis=1)
 
-	return dataset, region_counts, unique_tumours, tumour_ids
+	return dataset, region_counts, n_unique_tumours, tumour_ids
 
-def make_model(x_dim, unique_tumours, z_latent_dim, model_type, model_save_path):
+def make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_path):
 	x = tf.placeholder(tf.float32, [None, x_dim])
 	x_tumour_ids = tf.placeholder(tf.int32, [None, 1])
 	y_ = tf.placeholder(tf.float32, [None, 1])
 
-	n_unique_tumours = len(unique_tumours)
-	initial_tumour_latents = tf.abs(weight_variable([z_latent_dim,1]))
+	initial_tumour_latents = tf.abs(tf.concat([weight_variable([z_latent_dim//2,1]), weight_variable([z_latent_dim//2,1], mean=1)], axis = 0))
 	tumour_latents = tf.transpose(tf.tile(initial_tumour_latents, [1,n_unique_tumours]))
 
 	if model_type == "gaussian":
 		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, L, normalize_per_sample =  mutation_rate_model_gaussian(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
 	else:
-		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions =  mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, 
-				reg_latent_dim, prob_neural_net_params = prob_neural_net)
+		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions =  mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
 
 	with tf.name_scope('adam_optimizer'):
 		train_step = tf.train.AdamOptimizer(1e-2).minimize(cross_entropy)
@@ -193,6 +191,8 @@ def make_model(x_dim, unique_tumours, z_latent_dim, model_type, model_save_path)
 
 def train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path):
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
+	x_train, y_train, x_tumour_ids_train = train_data
+	train_dict = {x: x_train, y_: y_train, x_tumour_ids: x_tumour_ids_train}
 
 	with tf.Session() as sess:
 		sess.run(tf.global_variables_initializer())
@@ -206,6 +206,7 @@ def train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path)
 					train_cross_entropy = cross_entropy.eval(feed_dict=batch_dict)
 					print('Epoch %d.%d: training cross_entropy %g' % (j, i, train_cross_entropy))
 					print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
+					print('train accuracy %g' % accuracy.eval(feed_dict=train_dict))
 					print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
 					#print((tf.sigmoid(log_y_prediction)).eval(feed_dict=test_dict).ravel()[:10]) #neural net
 					print((tf.sigmoid(log_y_prediction)).eval(feed_dict=test_dict).ravel()[:10])
@@ -234,10 +235,10 @@ if __name__ == '__main__':
 	parser.add_argument('-m', '--mut', help='number of mutations per tumour', default=None)
 	parser.add_argument('-e','--epochs', help='number of epochs', default=1000)
 	parser.add_argument('-b','--batch', help='batch size', default=500)
-	parser.add_argument('--model', help='Model type: gaussian likelihood or neural net', default='gaussian')
+	parser.add_argument('--model', help='Model type: gaussian likelihood or neural net', default='nn')
 	#parser.add_argument('--loss', help = "loss type: poisson or mean_squared", default="poisson")
 	parser.add_argument('-f', '--feature-path', help='feature file path', default=DEF_FEATURE_PATH)
-	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=1000,type=int)
+	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=region_size,type=int)
 
 	args = parser.parse_args()
 	test_mode = args.test
@@ -250,36 +251,51 @@ if __name__ == '__main__':
 	region_size = args.region_size
 	#latent_dimension = args.latents
 
+	print("Fitting model version: " + model_type)
 	# model params
-	reg_latent_dim = 20
-	prob_neural_net = [200, 200, 1]
+	reg_latent_dim = 100
 	z_latent_dim = reg_latent_dim * 2
 
 	print("Loading dataset...")
-	mut_features, region_counts = load_dataset(dataset_path)
+	mut_features, region_counts = load_dataset(mut_dataset_path)
 	trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
-
-	training_set, labels, unique_tumours, x_tumour_ids = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size)
-
-	if n_tumours is not None:
-		tumor_ids = list(range(int(n_tumours)))
-		training_set, labels, unique_tumours, x_tumour_ids = filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids)
-	else:
-		n_tumours = len(unique_tumours)
 
 	# take a subset of mutations, if needed
 	if n_mut is not None:
 		n_mut = int(n_mut)
-		training_set = training_set[:n_mut]
-		labels = labels[:n_mut]
-		x_tumour_ids = x_tumour_ids[:n_mut]
+		indices = np.random.randint(mut_features.shape[0], size=n_mut)
+		mut_features = mut_features.iloc[indices]
+		region_counts = region_counts[indices]
 	else:
-		n_mut = training_set.shape[0]
+		n_mut = mut_features.shape[0]
+
+	# make filtering before making the training data!!
+	# if n_tumours is not None:
+	# 	tumor_ids = list(range(int(n_tumours)))
+	# 	training_set, labels, unique_tumours, x_tumour_ids = filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids)
+	# else:
+	# 	n_tumours = len(unique_tumours)
+
+	if os.path.exists(dataset_with_annotation):
+		dictionary = load_from_HDF(dataset_with_annotation)
+		training_set = dictionary["training_set"]
+		labels = dictionary["labels"]
+		n_unique_tumours = int(dictionary["n_unique_tumours"])
+		x_tumour_ids = dictionary["x_tumour_ids"]
+	else:
+		training_set, labels, n_unique_tumours, x_tumour_ids = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size)
+		print(training_set[:10])
+		save_to_HDF(dataset_with_annotation, {"training_set": training_set, "labels": labels, "n_unique_tumours": np.array(n_unique_tumours), "x_tumour_ids" : x_tumour_ids})
+
+	# !!!!!
+	indices = np.random.choice(training_set.shape[0], size=n_mut)
+	training_set = training_set[indices]
+	labels = labels[indices]
+	x_tumour_ids = x_tumour_ids[indices]
 
 	print("Processing {} mutations from {} tumour(s) ...".format(training_set.shape[0], n_tumours))
 
 	x_dim = training_set.shape[1]
-	prob_neural_net = [x_dim + z_latent_dim] + prob_neural_net
 
 	tf.reset_default_graph()
 	model_save_path = model_save_path.format(model_type, n_tumours, n_mut)
@@ -288,13 +304,13 @@ if __name__ == '__main__':
 	# Split dataset into train / test
 	x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = model_selection.train_test_split(training_set, labels, x_tumour_ids, test_size=0.2, random_state=1991)
 
-	tf_vars, metrics, meta, extra = make_model(x_dim, unique_tumours, z_latent_dim, model_type, model_save_path)
+	tf_vars, metrics, meta, extra = make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_path)
 
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
 	cross_entropy, accuracy = metrics
 	train_step, saver = meta
 	if model_type == "gaussian":
-		 z_t, y_region, predictions, L = extra
+		z_t, y_region, predictions, L = extra
 	else: 
 		z_t, y_region, predictions = extra
 
@@ -303,7 +319,6 @@ if __name__ == '__main__':
 	if not test_mode:
 		print("Optimizing...")
 		train_data = [x_train, y_train, x_tumour_ids_train]
-		tf_vars = [x, x_tumour_ids, y_, log_y_prediction]
 
 		train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path)
 	else:
@@ -323,7 +338,7 @@ if __name__ == '__main__':
 			print("0: " + str(np.mean(pred[np.logical_not(y_test.ravel())])))
 
 			correct_prediction = correct_predictions(predictions, y_).eval(feed_dict=test_dict).ravel()
-			
+
 			print("Mean accuracy within a class")
 			print("1: " + str(np.mean(correct_prediction[y_test.ravel()])))
 			print("0: " + str(np.mean(correct_prediction[np.logical_not(y_test.ravel())])))
@@ -338,7 +353,6 @@ if __name__ == '__main__':
 
 
 # add time component (z_t comes from RNN over time)
-# make a training summary
 # version with cnn to make a summary of region features
 # try relu versus tanh
 # try different architectures of neural net (number of layers, number of units)
