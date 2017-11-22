@@ -137,6 +137,9 @@ class VariantParser(object):
 		compute_signatures = self.time_points is not None and  self.alex_sig is not None and self.signatures is not None
 
 		for i, record in enumerate(mut_list):
+			if i % (len(mut_list) // 20) == 0:
+				print(str(i / float(len(mut_list)) * 100) + "% ready")
+
 			#print("features: "+str(i))
 			chromosome = "chr" + str(record.CHROM)
 			position = record.POS 
@@ -174,9 +177,9 @@ class VariantParser(object):
 
 			if self.other_features:
 				mut_feature_data = []
-				other_feature_names = self.other_features.keys()
-				for feature in self.other_features.keys():
-					found_region = Variant.find_variant_in_region(record, self.chromatin_dict[chromosome])
+				for feature_name in self.other_features.keys():
+					feature_dict = sorted(self.other_features[feature_name][chromosome])
+					found_region = Variant.find_variant_in_region(record, feature_dict)
 					if found_region:
 						mut_feature_data.append(found_region[2])
 					else:
@@ -226,8 +229,9 @@ class VariantParser(object):
 			feature_matrix = combine_column([feature_matrix, trans_region, sense])
 
 		if self.other_features:
-			other_feature_data = add_column(other_feature_data, other_feature_names)
-			feature_matrix = combine_column([feature_matrix, feature_data])
+			other_feature_data = np.squeeze(np.array(other_feature_data))
+			other_feature_data = add_colname(other_feature_data, list(self.other_features.keys()))
+			feature_matrix = combine_column([feature_matrix, other_feature_data])
 
 		if (compute_signatures):
 			se = add_colname(se, "Exposure")
