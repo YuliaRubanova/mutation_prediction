@@ -27,7 +27,11 @@ region_size = 100 #!!!!!
 DEF_FEATURE_PATH = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
-mut_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part1.pickle"] #!!!!!
+mut_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part1.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part2.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part3.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part4.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part5.pickle"]
 feature_path = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.ckpt"
 dataset_with_annotation = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.region_size" + str(region_size) + ".annotation.hdf5"
@@ -139,6 +143,8 @@ def make_training_set(mut_features, region_counts, trinuc, feature_path, region_
 	trinuc_dict, trinuc_list = trinuc
 	mut_types = mut_features.loc[:,trinuc_list]
 
+	mut_vaf = np.array(mut_features['VAF'])
+
 	# !!!! new region_counts
 	region_features, rc = get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size)
 
@@ -158,7 +164,20 @@ def make_training_set(mut_features, region_counts, trinuc, feature_path, region_
 
 	dataset = np.concatenate((mut_types, region_features), axis=1)
 
-	return dataset, region_counts, n_unique_tumours, tumour_ids
+	return dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf
+
+def train_test_split(data_list, split_by, test_size=0.2, random_state=1991):
+	split = int(len(split_by)*(1-test_size))
+	split_vaf = sorted(split_by)[::-1][split]
+
+	train_indices = np.random.shuffle(np.where(split_by > split_vaf))
+	test_indices = np.random.shuffle(np.where(split_by <= split_vaf))
+
+	splitted_data = []
+	for data in data_list:
+		splitted_data.append(np.squeeze(data[train_indices], axis=0))
+		splitted_data.append(np.squeeze(data[test_indices], axis = 0))
+	return splitted_data
 
 def make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_path):
 	x = tf.placeholder(tf.float32, [None, x_dim])
@@ -198,7 +217,7 @@ def train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path)
 		sess.run(tf.global_variables_initializer())
 
 		for j in range(n_epochs):
-			for i in range(x_train.shape[0] //batch_size+1):
+			for i in range(x_train.shape[0] //batch_size):
 				x_batch, y_batch, x_tumour_ids_batch = get_batch(train_data, batch_size, i)
 				batch_dict = {x: x_batch, y_: y_batch, x_tumour_ids: x_tumour_ids_batch}
 
@@ -274,7 +293,6 @@ if __name__ == '__main__':
 	# 	tumor_ids = list(range(int(n_tumours)))
 	# 	training_set, labels, unique_tumours, x_tumour_ids = filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids)
 	# else:
-	# 	n_tumours = len(unique_tumours)
 
 	if os.path.exists(dataset_with_annotation):
 		dictionary = load_from_HDF(dataset_with_annotation)
@@ -282,18 +300,19 @@ if __name__ == '__main__':
 		labels = dictionary["labels"]
 		n_unique_tumours = int(dictionary["n_unique_tumours"])
 		x_tumour_ids = dictionary["x_tumour_ids"]
+		mut_vaf = dictionary["mut_vaf"]
 	else:
-		training_set, labels, n_unique_tumours, x_tumour_ids = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size)
+		training_set, labels, n_unique_tumours, x_tumour_ids, mut_vaf = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size)
 		print(training_set[:10])
-		save_to_HDF(dataset_with_annotation, {"training_set": training_set, "labels": labels, "n_unique_tumours": np.array(n_unique_tumours), "x_tumour_ids" : x_tumour_ids})
+		save_to_HDF(dataset_with_annotation, 
+			{"training_set": training_set, "labels": labels, "n_unique_tumours": np.array(n_unique_tumours), "x_tumour_ids" : x_tumour_ids, "mut_vaf": mut_vaf})
 
-	# !!!!!
 	indices = np.random.choice(training_set.shape[0], size=n_mut)
 	training_set = training_set[indices]
 	labels = labels[indices]
 	x_tumour_ids = x_tumour_ids[indices]
 
-	print("Processing {} mutations from {} tumour(s) ...".format(training_set.shape[0], n_tumours))
+	print("Processing {} mutations from {} tumour(s) ...".format(training_set.shape[0], n_unique_tumours))
 
 	x_dim = training_set.shape[1]
 
@@ -302,7 +321,15 @@ if __name__ == '__main__':
 	os.makedirs(model_save_path, exist_ok=True)
 
 	# Split dataset into train / test
-	x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = model_selection.train_test_split(training_set, labels, x_tumour_ids, test_size=0.2, random_state=1991)
+	x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, x_tumour_ids], split_by = mut_vaf, test_size=0.2)
+
+	print(x_train.shape)
+	print(x_test.shape)
+	print(y_train.shape)
+	print(y_test.shape)
+	print(x_tumour_ids_train.shape)
+	print(x_tumour_ids_test.shape)
+
 
 	tf_vars, metrics, meta, extra = make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_path)
 
