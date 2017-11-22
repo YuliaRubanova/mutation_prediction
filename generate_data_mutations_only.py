@@ -18,7 +18,7 @@ import numpy as np
 ##################################################################
 
 maxsize_pickle = 1
-max_mut_per_tumour = 1000
+max_mut_per_tumour = 10000
 
 DEF_FEATURE_PATH = "/home/yulia/mnt/dna_features_ryoga/"
 DEF_OUTPUT = "/home/yulia/mnt/mutation_prediction_data/region_dataset.mutTumour" + str(max_mut_per_tumour) + ".mutations_only.pickle"
@@ -33,13 +33,21 @@ def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types):
 
 	mut_types = [np.random.multinomial(1, [1/float(n_mut_types)]*n_mut_types) for i in range(n_random)]
 
-	chromatin = np.array([[np.random.choice([0,1])] for i in range(n_random)])
-	transcribed = np.array([[np.random.choice([0,1])] for i in range(n_random)])
-	strand = np.array([[np.random.choice([0,1])] for i in range(n_random)])
+	chromatin = np.random.choice([0,1])
+	chromatin = np.array([[chromatin] for i in range(n_random)])
+	transcribed = np.random.choice([0,1])
+	transcribed = np.array([[transcribed] for i in range(n_random)])
+	strand = np.random.choice([0,1])
+	strand = np.array([[strand] for i in range(n_random)])
 
 	strand[np.where(transcribed == 0)] = [-1]
 
 	random_mutations = combine_column([tumour_names, chrom, pos, vaf, mut_types, chromatin, transcribed, strand])
+	
+	n_other_features = len(colnames) - random_mutations.shape[1]
+	other_features = np.random.uniform(size=(n_random, n_other_features))
+	random_mutations = combine_column([random_mutations, other_features])
+
 	return pd.DataFrame(random_mutations, columns = colnames)
 
 def generate_training_set(vcf_list, hg19, trinuc, features_chromatin_mRNA, other_features):
@@ -125,6 +133,8 @@ if __name__ =="__main__":
 		other_features = {}
 		for file in os.listdir(feature_path):
 			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
+				continue
+			if not file.endswith(".pickle"):
 				continue
 			other_features[file] = load_pickle(os.path.join(feature_path, file))
 
