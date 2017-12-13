@@ -87,7 +87,7 @@ def generate_training_set(vcf_list, hg19, trinuc, features_chromatin_mRNA, other
 
 		mut_features_all = pd.concat([mut_features_all, mut_features_random])
 		region_counts_all.extend(region_counts_random)
-	
+
 		print("DONE-{}".format(tumour_name))
 
 	region_counts_all = np.squeeze(np.array(region_counts_all))
@@ -121,25 +121,7 @@ if __name__ =="__main__":
 
 	vcf_list = [os.path.join(vcf_path,x) for x in vcf_list]
 
-	try:
-		mRNA = load_pickle(os.path.join(feature_path, "mRNA.pickle"))
-		trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
-		#alex_signature_file = load_npy(os.path.join(feature_path,"signature.npy"))
-		hg19 = load_pickle(os.path.join(feature_path,"hg.pickle"))
-		chromatin = load_pickle(os.path.join(feature_path, "chromatin.pickle"))
-
-		features_chromatin_mRNA= {'chromatin':chromatin, 'mRNA': mRNA}
-
-		other_features = {}
-		for file in os.listdir(feature_path):
-			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
-				continue
-			if not file.endswith(".pickle"):
-				continue
-			other_features[file] = load_pickle(os.path.join(feature_path, file))
-
-	except Exception as error:
-		raise Exception("Please provide valid compiled feature data files.")
+	features_chromatin_mRNA, other_features, hg19 = load_annotation(feature_path)
 
 	n_pickle_files = len(vcf_list) // maxsize_pickle + 1
 

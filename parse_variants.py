@@ -6,6 +6,7 @@ from sklearn.model_selection import KFold
 import vcf # pip3 install pyvcf
 import numpy as np
 from helpers import *
+import time
 
 np.random.seed(1)
 max_variants = 10**5 # mutations in the tumour are subsampled to this number
@@ -249,19 +250,13 @@ class VariantParser(object):
 	def get_region_around_mutation(self, mut, region_size):
 		regions = []
 		for i, record in enumerate(mut):
-			chrom = "chr" + str(record.CHROM)
-			position = record.POS 
-			start, end = max(0,position - region_size//2), min(position + region_size//2, chromosome_lengths[chrom])
-			regions.append((chrom, start, end))
-		return regions
-
-	def get_region_around_mutation_from_features(self, mut_feature_array, region_size):
-		regions = []
-
-		for i, record in enumerate(mut_feature_array):
-			chrom = record['Chr'].values[0]
-			position = int(record['Pos'])
-
+			if isinstance(record,  pd.DataFrame):
+				chrom = record['Chr'].values[0]
+				position = int(record['Pos'])
+			else:
+				chrom = "chr" + str(record.CHROM)
+				position = record.POS 
+			
 			start, end = max(0,position - region_size//2), min(position + region_size//2, chromosome_lengths[chrom])
 			regions.append((chrom, start, end))
 		return regions
@@ -273,24 +268,74 @@ class VariantParser(object):
 		for region in region_list:
 			chrom,start,end = region
 
-			chromatin_chromosome = sorted(self.chromatin_dict[chrom])
-			mrna_chromosome = sorted(self.mrna_dict[chrom])
+			chromatin_chromosome = self.chromatin_dict[chrom]
+			mrna_chromosome = self.mrna_dict[chrom]
 
 			chromatin = add_colname(fill_data_for_region([start, end], chromatin_chromosome), "Chromatin")
 			mrna = add_colname(np.matrix(fill_data_for_region([start, end], mrna_chromosome, fill_mRNA)), ["Transcribed", "Strand"])
 
 			other_features = []
 			for feature_name in self.other_features.keys():
-				feature_dict = sorted(self.other_features[feature_name][chrom])
+				feature_dict = self.other_features[feature_name][chrom]
 				other_features.append(add_colname(fill_data_for_region([start, end], feature_dict, fill_real), feature_name))
 			other_features = np.transpose(np.squeeze(other_features))
 
 			# find other mutations that might fall into this region
 			counts = get_counts_per_bin(mut_features, (chrom, start, end), self.trinuc)
+
 			counts_all.append(counts)
 			features_all.append(combine_column([chromatin, mrna, other_features]))
 
 		return counts_all, features_all
+
+def fill_mRNA(region = None):
+	trans_region, sense = 0,0
+
+	if region:
+		trans_region = 1 
+		sense = int(region[2] == "+")
+	else:
+		trans_region = 0
+		sense == -1
+
+	return [trans_region, sense]
+
+def fill_real(region = None):
+	return region[2] if region else 0
+
+def fill_binary(region = None):
+		return 1 if region else 0
+
+def fill_data_for_region(interval, sorted_region_list, func_fill_data = fill_binary):
+	"""
+	Fill the data for the selected interval. 
+	Returns the binary array. The element of the returned array with be equal to 1 if this position overlaps some region in sorted_region_list, and 0 otherwise
+	"""
+	# by default fill with data as if it is not covered by any region from the list
+	data = [func_fill_data()] * (interval[1] - interval[0])
+
+	ind_region, region = find_closest_region(interval, sorted_region_list)
+	if ind_region == -1:
+		return data
+
+	start_index = end_index = ind_region
+
+	while start_index >= 0 and sorted_region_list[start_index][0] > interval[0]:
+		start_index -= 1
+	start_index = max(0, start_index)
+
+	while end_index < len(sorted_region_list) and sorted_region_list[end_index][1] < interval[1]:
+		end_index += 1
+	end_index = min(end_index, len(sorted_region_list)-1)
+
+	for index in range(start_index, end_index+1):
+		start = max(sorted_region_list[index][0], interval[0]) - interval[0] - 1
+		end = min(sorted_region_list[index][1], interval[1]) - interval[0] - 1
+		# fill with data corresponding to the region. Each element can be a list or interger
+		for i in range(start, end+1):
+			tmp = func_fill_data(sorted_region_list[index])
+			data[i] = tmp
+	return data
 
 class Variant(object):
 

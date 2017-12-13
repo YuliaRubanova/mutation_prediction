@@ -43,6 +43,9 @@ def read_mRNA(filename):
 			strand = line[9]
 			output[chrom].append((int(start_pos), int(end_pos), strand))
 	
+	for key in output.keys():
+		output[key] = sorted(output[key])
+
 	with open(feature_data+"mRNA"+".pickle", 'wb') as handle:
 		pickle.dump(output, handle, protocol=2)
 
@@ -62,6 +65,10 @@ def read_chromatin(filename):
 			start_pos = line[1]
 			end_pos = line[2]
 			output[chrom].append((int(start_pos), int(end_pos)))
+	
+	for key in output.keys():
+		output[key] = sorted(output[key])
+
 	with open(feature_data+"chromatin"+".pickle", 'wb') as handle:
 		pickle.dump(output, handle, protocol=2)
 
@@ -80,6 +87,10 @@ def read_data_1000scale(filename, save_to):
 			end_pos = line[2]
 			score = line[4]
 			output[chrom].append((int(start_pos), int(end_pos), float(score)/1000.0))
+
+	for key in output.keys():
+		output[key] = sorted(output[key])
+
 	with open(save_to, 'wb') as handle:
 		pickle.dump(output, handle, protocol=2)
 

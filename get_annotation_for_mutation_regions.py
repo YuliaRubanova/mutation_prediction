@@ -44,7 +44,11 @@ def load_annotation(feature_path):
 		for file in os.listdir(feature_path):
 			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
 				continue
-			other_features[file[:-len(".pickle")]] = load_pickle(os.path.join(feature_path, file))
+			if not file.endswith(".pickle"):
+				continue
+
+			new_feature = load_pickle(os.path.join(feature_path, file))
+			other_features[file[:-len(".pickle")]] = new_feature
 	except Exception as error:
 		raise Exception("Please provide valid compiled feature data files.")
 
@@ -63,9 +67,26 @@ def get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, regi
 	t = time.time()
 
 	for i, m in mut_features.iterrows():
+		if i % (mut_features.shape[0] // 20) == 0:
+				print(str(i / float(mut_features.shape[0]) * 100) + "% ready. Time elapsed: " + str(time.time()-t))
+
 		mut = pd.DataFrame(m.to_frame().transpose(), columns = mut_features.columns.values)
-		counts_features = get_annotation_for_mutation_regions_one(mut, trinuc, features_chromatin_mRNA, other_features, hg19, region_size)
-		region_counts_all[i], region_features_all[i] = counts_features
+		tumour_name = mut['Tumour']
+
+		variants_parser = VariantParser(tumour_name, hg19, trinuc,
+			chromatin_dict = features_chromatin_mRNA['chromatin'], mrna_dict = features_chromatin_mRNA['mRNA'],
+			other_features = other_features)
+
+		mut_regions = variants_parser.get_region_around_mutation([mut], region_size)
+
+		# region_counts -- counts of mutations there are in the regions that we selected
+		# region_features -- features in the region, such as chromatin
+		region_counts, region_features = variants_parser.get_region_features(mut_regions, mut)
+
+		# take only region counts that correspond to the asked mutation type
+		region_counts = get_counts_by_type(region_counts, mut, trinuc)
+
+		region_counts_all[i], region_features_all[i] = region_counts, region_features
 
 	print("Annotation loaded. Time elapsed: " + str(time.time()-t) + ". Per mutation: " + str((time.time()-t) / float(n_samples)))
 
@@ -73,21 +94,3 @@ def get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, regi
 	region_features_all = np.squeeze(np.array(region_features_all), axis=1)
 
 	return region_features_all, region_counts_all
-
-def get_annotation_for_mutation_regions_one(mut, trinuc, features_chromatin_mRNA, other_features, hg19, region_size):
-	tumour_name = mut['Tumour']
-
-	variants_parser = VariantParser(tumour_name, hg19, trinuc,
-		chromatin_dict = features_chromatin_mRNA['chromatin'], mrna_dict = features_chromatin_mRNA['mRNA'],
-		other_features = other_features)
-
-	mut_regions = variants_parser.get_region_around_mutation_from_features([mut], region_size)
-	
-	# region_counts -- counts of mutations there are in the regions that we selected
-	# region_features -- features in the region, such as chromatin
-	region_counts, region_features = variants_parser.get_region_features(mut_regions, mut)
-
-	# take only region counts that correspond to the asked mutation type
-	region_counts = get_counts_by_type(region_counts, mut, trinuc)
-
-	return region_counts, region_features

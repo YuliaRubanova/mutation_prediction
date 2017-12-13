@@ -115,6 +115,16 @@ def neural_net(data, weights, biases):
 		x = tf.nn.relu(tf.matmul(x, w) + b)
 		#x = tf.tanh(tf.matmul(x, w) + b)
 
-	# add softmax?? !!! #tf.nn.softmax(
 	output = tf.matmul(x, weights[-1]) + biases[-1]
 	return output
+
+
+def correct_predictions(predictions, y_):
+  predictions_binary = tf.cast(tf.less(tf.constant(0.5), predictions),tf.int64) # gaussian
+  correct_prediction = tf.equal(predictions_binary, tf.cast(y_,tf.int64))
+  correct_prediction = tf.cast(correct_prediction, tf.float32)
+  return correct_prediction
+
+def mean_squared_error(truth, predicted):
+  return tf.reduce_mean(tf.square(truth - predicted))
+    

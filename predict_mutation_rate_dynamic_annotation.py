@@ -15,6 +15,7 @@ import numpy as np
 from get_annotation_for_mutation_regions import *
 import pandas as pd
 import glob
+from training_set import *
 
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -22,41 +23,19 @@ import tensorflow as tf
 
 FLAGS = None
 
-region_size = 100 #!!!!!
+region_size = 2 #!!!!!
 
 DEF_FEATURE_PATH = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
-mut_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part1.pickle",
-					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part2.pickle",
-					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part3.pickle",
-					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part4.pickle",
-					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.mutations_only.part5.pickle"]
+mut_dataset_path = ["/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part1.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part2.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part3.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part4.pickle",
+					"/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part5.pickle"]
 feature_path = "/Users/yulia/Documents/mutational_signatures/dna_features_ryoga/"
 model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.ckpt"
-dataset_with_annotation = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour1000.region_size" + str(region_size) + ".annotation.hdf5"
-
-def load_dataset(dataset_path, n_parts = 1000):
-	paths = []
-	for p in dataset_path:
-		paths.extend(glob.glob(p))
-
-	if len(paths) == 0:
-		raise Exception("No dataset provided")
-
-	mut_features, region_counts = load_pickle(paths[0])
-
-	for path in paths[1:n_parts]:
-		mutf, counts = load_pickle(path)
-		mut_features = pd.concat([mut_features, mutf])
-		region_counts = np.concatenate((region_counts, counts))
-	return mut_features, region_counts
-
-def correct_predictions(predictions, y_):
-	predictions_binary = tf.cast(tf.less(tf.constant(0.5), predictions),tf.int64) # gaussian
-	correct_prediction = tf.equal(predictions_binary, tf.cast(y_,tf.int64))
-	correct_prediction = tf.cast(correct_prediction, tf.float32)
-	return correct_prediction
+dataset_with_annotation = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.mutTumour10000.region_size" + str(region_size) + ".annotation.hdf5"
 
 def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
@@ -102,7 +81,6 @@ def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent
 	return p, z_t, y_region, cross_entropy, accuracy, predictions, L, normalize_per_sample
 
 
-
 def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
 	n_samples = X.get_shape()[0].value
@@ -130,54 +108,6 @@ def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	accuracy = tf.reduce_mean(correct_prediction)
 
 	return p, z_t, y_region, cross_entropy, accuracy, predictions
-
-
-def make_training_set(mut_features, region_counts, trinuc, feature_path, region_size):
-	mut_features = mut_features.reset_index(drop=True)
-
-	mut_annotation = mut_features.iloc[:,:3]
-	tumour_names = np.asarray(mut_annotation.Tumour).ravel()
-	unique_tumours = np.unique(tumour_names)
-	tumour_ids = np.squeeze(np.asarray([np.where(unique_tumours == name) for name in tumour_names]))[:,np.newaxis]
-	
-	trinuc_dict, trinuc_list = trinuc
-	mut_types = mut_features.loc[:,trinuc_list]
-
-	mut_vaf = np.array(mut_features['VAF'])
-
-	# !!!! new region_counts
-	region_features, rc = get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size)
-
-	region_features = region_features[:,1:]
-
-	if not(mut_features.shape[0] == region_counts.shape[0] and region_counts.shape[0] == region_features.shape[0]):
-		raise Exception("Dataset is incorrect: all parts should contain the same number of samples")
-
-	n_samples = mut_features.shape[0]
-	regionsize = region_features.shape[1]
-	n_region_features = region_features.shape[2]
-	n_mut_types = mut_types.shape[1]
-	n_unique_tumours = len(unique_tumours)
-
-	region_features = region_features.reshape((n_samples, regionsize*n_region_features))
-	region_counts = region_counts[:,np.newaxis]
-
-	dataset = np.concatenate((mut_types, region_features), axis=1)
-
-	return dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf
-
-def train_test_split(data_list, split_by, test_size=0.2, random_state=1991):
-	split = int(len(split_by)*(1-test_size))
-	split_vaf = sorted(split_by)[::-1][split]
-
-	train_indices = np.random.shuffle(np.where(split_by > split_vaf))
-	test_indices = np.random.shuffle(np.where(split_by <= split_vaf))
-
-	splitted_data = []
-	for data in data_list:
-		splitted_data.append(np.squeeze(data[train_indices], axis=0))
-		splitted_data.append(np.squeeze(data[test_indices], axis = 0))
-	return splitted_data
 
 def make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_path):
 	x = tf.placeholder(tf.float32, [None, x_dim])
@@ -223,21 +153,23 @@ def train(train_data, test_dict, tf_vars, n_epochs, batch_size, model_save_path)
 
 				if i % 5 == 0:
 					train_cross_entropy = cross_entropy.eval(feed_dict=batch_dict)
-					print('Epoch %d.%d: training cross_entropy %g' % (j, i, train_cross_entropy))
-					print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
-					print('train accuracy %g' % accuracy.eval(feed_dict=train_dict))
-					print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
+					print('Epoch %d.%d: train cross_entropy %g; test cross_entropy %g; train accuracy %g; test accuracy %g' 
+						% (j, i, train_cross_entropy, cross_entropy.eval(feed_dict=test_dict), 
+							accuracy.eval(feed_dict=train_dict), accuracy.eval(feed_dict=test_dict) ))
+					# print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
+					# print('train accuracy %g' % accuracy.eval(feed_dict=train_dict))
+					# print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
 					#print((tf.sigmoid(log_y_prediction)).eval(feed_dict=test_dict).ravel()[:10]) #neural net
-					print((tf.sigmoid(log_y_prediction)).eval(feed_dict=test_dict).ravel()[:10])
-					print(y_.eval(feed_dict=test_dict).ravel()[:10])
+					#print(y_.eval(feed_dict=test_dict).ravel()[:10])
 					#print(L.eval(feed_dict=test_dict).ravel()[:10])
-					print((log_y_prediction).eval(feed_dict=test_dict).ravel()[:10])
-					print(z_t.eval(feed_dict=batch_dict)[0,:10])
+					#print((log_y_prediction).eval(feed_dict=test_dict).ravel()[:10])
+					#print(z_t.eval(feed_dict=batch_dict)[0,:10])
 				train_step.run(feed_dict=batch_dict)
 			
-			model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
-			save_path = saver.save(sess, model_save_path_tmp)
-			print("Model saved in file: %s" % save_path)
+			if j % 5 == 0:
+				model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
+				save_path = saver.save(sess, model_save_path_tmp)
+				print("Model saved in file: %s" % save_path)
 
 		print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
 		print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
@@ -252,7 +184,7 @@ if __name__ == '__main__':
 	#parser.add_argument('--latents', help='number of latent dimensions', default=100, type=int)
 	parser.add_argument('-n', '--tumours', help='number of tumours to include in the set', default=None)
 	parser.add_argument('-m', '--mut', help='number of mutations per tumour', default=None)
-	parser.add_argument('-e','--epochs', help='number of epochs', default=1000)
+	parser.add_argument('-e','--epochs', help='number of epochs', default=100)
 	parser.add_argument('-b','--batch', help='batch size', default=500)
 	parser.add_argument('--model', help='Model type: gaussian likelihood or neural net', default='nn')
 	#parser.add_argument('--loss', help = "loss type: poisson or mean_squared", default="poisson")
@@ -279,20 +211,7 @@ if __name__ == '__main__':
 	mut_features, region_counts = load_dataset(mut_dataset_path)
 	trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
 
-	# take a subset of mutations, if needed
-	if n_mut is not None:
-		n_mut = int(n_mut)
-		indices = np.random.randint(mut_features.shape[0], size=n_mut)
-		mut_features = mut_features.iloc[indices]
-		region_counts = region_counts[indices]
-	else:
-		n_mut = mut_features.shape[0]
-
-	# make filtering before making the training data!!
-	# if n_tumours is not None:
-	# 	tumor_ids = list(range(int(n_tumours)))
-	# 	training_set, labels, unique_tumours, x_tumour_ids = filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids)
-	# else:
+	mut_features, region_counts, n_mut = filter_mutation(mut_features, region_counts, n_mut)
 
 	if os.path.exists(dataset_with_annotation):
 		dictionary = load_from_HDF(dataset_with_annotation)
@@ -303,7 +222,6 @@ if __name__ == '__main__':
 		mut_vaf = dictionary["mut_vaf"]
 	else:
 		training_set, labels, n_unique_tumours, x_tumour_ids, mut_vaf = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size)
-		print(training_set[:10])
 		save_to_HDF(dataset_with_annotation, 
 			{"training_set": training_set, "labels": labels, "n_unique_tumours": np.array(n_unique_tumours), "x_tumour_ids" : x_tumour_ids, "mut_vaf": mut_vaf})
 
@@ -323,19 +241,12 @@ if __name__ == '__main__':
 	# Split dataset into train / test
 	x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, x_tumour_ids], split_by = mut_vaf, test_size=0.2)
 
-	print(x_train.shape)
-	print(x_test.shape)
-	print(y_train.shape)
-	print(y_test.shape)
-	print(x_tumour_ids_train.shape)
-	print(x_tumour_ids_test.shape)
-
-
 	tf_vars, metrics, meta, extra = make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_path)
 
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
 	cross_entropy, accuracy = metrics
 	train_step, saver = meta
+	
 	if model_type == "gaussian":
 		z_t, y_region, predictions, L = extra
 	else: 
@@ -361,22 +272,22 @@ if __name__ == '__main__':
 
 			print("Mean prediction")
 			pred = predictions.eval(feed_dict=test_dict).ravel()
-			print("1: " + str(np.mean(pred[y_test.ravel()])))
-			print("0: " + str(np.mean(pred[np.logical_not(y_test.ravel())])))
+			print("1: " + str(np.mean(pred[y_test.ravel().astype(int)])))
+			print("0: " + str(np.mean(pred[np.logical_not(y_test.ravel().astype(int))])))
 
 			correct_prediction = correct_predictions(predictions, y_).eval(feed_dict=test_dict).ravel()
 
 			print("Mean accuracy within a class")
-			print("1: " + str(np.mean(correct_prediction[y_test.ravel()])))
-			print("0: " + str(np.mean(correct_prediction[np.logical_not(y_test.ravel())])))
+			print("1: " + str(np.mean(correct_prediction[y_test.ravel().astype(int)])))
+			print("0: " + str(np.mean(correct_prediction[np.logical_not(y_test.ravel().astype(int))])))
 
 			print("Tumour representation std")
-			print(np.std(z_t.eval(feed_dict=test_dict), axis=0))
+			print(np.mean(np.std(z_t.eval(feed_dict=test_dict), axis=0)))
 
 			if model_type == "gaussian":
 				print("Likelihood of region representation:")
-				print("1: " + str(np.mean(L.eval(feed_dict=test_dict)[y_test.ravel()])))
-				print("0: " + str(np.mean(L.eval(feed_dict=test_dict)[np.logical_not(y_test.ravel())])))
+				print("1: " + str(np.mean(L.eval(feed_dict=test_dict)[y_test.ravel().astype(int)])))
+				print("0: " + str(np.mean(L.eval(feed_dict=test_dict)[np.logical_not(y_test.ravel().astype(int))])))
 
 
 # add time component (z_t comes from RNN over time)

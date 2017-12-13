@@ -152,55 +152,6 @@ def have_intersection(interval1, interval2):
 
 	return two_inside_one or one_inside_two or two_overlapps_left or two_overlapps_right
 
-def fill_mRNA(region = None):
-	trans_region, sense = 0,0
-
-	if region:
-		trans_region = 1 
-		sense = int(region[2] == "+")
-	else:
-		trans_region = 0
-		sense == -1
-
-	return [trans_region, sense]
-
-def fill_real(region = None):
-	return region[2] if region else 0
-
-def fill_binary(region = None):
-		return 1 if region else 0
-
-def fill_data_for_region(interval, sorted_region_list, func_fill_data = fill_binary):
-	"""
-	Fill the data for the selected interval. 
-	Returns the binary array. The element of the returned array with be equal to 1 if this position overlaps some region in sorted_region_list, and 0 otherwise
-	"""
-	# by default fill with data as if it is not covered by any region from the list
-	data = [func_fill_data()] * (interval[1] - interval[0])
-
-	ind_region, region = find_closest_region(interval, sorted_region_list)
-	if ind_region == -1:
-		return data
-
-	start_index = end_index = ind_region
-
-	while start_index >= 0 and sorted_region_list[start_index][0] > interval[0]:
-		start_index -= 1
-	start_index = max(0, start_index)
-
-	while end_index < len(sorted_region_list) and sorted_region_list[end_index][1] < interval[1]:
-		end_index += 1
-	end_index = min(end_index, len(sorted_region_list)-1)
-
-	for index in range(start_index, end_index+1):
-		start = max(sorted_region_list[index][0], interval[0]) - interval[0] - 1
-		end = min(sorted_region_list[index][1], interval[1]) - interval[0] - 1
-		# fill with data corresponding to the region. Each element can be a list or interger
-		for i in range(start, end+1):
-			tmp = func_fill_data(sorted_region_list[index])
-			data[i] = tmp
-	return data
-
 
 def get_col_indices_trinucleotides(variant_features, trinuc):
 	trinuc_dict, trinuc_list = trinuc
