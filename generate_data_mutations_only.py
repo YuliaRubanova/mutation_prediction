@@ -121,7 +121,7 @@ if __name__ =="__main__":
 
 	vcf_list = [os.path.join(vcf_path,x) for x in vcf_list]
 
-	features_chromatin_mRNA, other_features, hg19 = load_annotation(feature_path)
+	features_chromatin_mRNA, other_features, hg19, trinuc = load_annotation(feature_path)
 
 	n_pickle_files = len(vcf_list) // maxsize_pickle + 1
 

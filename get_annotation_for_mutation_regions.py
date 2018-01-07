@@ -3,7 +3,7 @@
 #v2.1
 import time
 import argparse
-import os
+import os, sys
 from read_files import *
 from parse_variants import *
 from helpers import *
@@ -31,46 +31,24 @@ def get_random_regions(n, region_size):
 
 	return regions
 
-
-def load_annotation(feature_path):
-	try:
-		mRNA = load_pickle(os.path.join(feature_path, "mRNA.pickle"))
-		trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
-		#alex_signature_file = load_npy(os.path.join(feature_path,"signature.npy"))
-		hg19 = load_pickle(os.path.join(feature_path,"hg.pickle"))
-		chromatin = load_pickle(os.path.join(feature_path, "chromatin.pickle"))
-		
-		other_features = {}
-		for file in os.listdir(feature_path):
-			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
-				continue
-			if not file.endswith(".pickle"):
-				continue
-
-			new_feature = load_pickle(os.path.join(feature_path, file))
-			other_features[file[:-len(".pickle")]] = new_feature
-	except Exception as error:
-		raise Exception("Please provide valid compiled feature data files.")
-
-	features_chromatin_mRNA= {'chromatin':chromatin, 'mRNA': mRNA}
-
-	return features_chromatin_mRNA, other_features, hg19
-
 def get_annotation_for_mutation_regions(mut_features, trinuc, feature_path, region_size):
 	n_samples = mut_features.shape[0]
 	region_features_all = [None] * mut_features.shape[0]
 	region_counts_all = [None] * mut_features.shape[0]
 
-	features_chromatin_mRNA, other_features, hg19 = load_annotation(feature_path)
+	features_chromatin_mRNA, other_features, hg19, trinuc = load_annotation(feature_path)
 
 	print("Loading annotations for regions for " + str(n_samples) + " mutations...")
 	t = time.time()
+
+	mut_features = mut_features.reset_index(drop=True)
 
 	for i, m in mut_features.iterrows():
 		if i % (mut_features.shape[0] // 20) == 0:
 				print(str(i / float(mut_features.shape[0]) * 100) + "% ready. Time elapsed: " + str(time.time()-t))
 
 		mut = pd.DataFrame(m.to_frame().transpose(), columns = mut_features.columns.values)
+
 		tumour_name = mut['Tumour']
 
 		variants_parser = VariantParser(tumour_name, hg19, trinuc,

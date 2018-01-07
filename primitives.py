@@ -125,6 +125,11 @@ def correct_predictions(predictions, y_):
   correct_prediction = tf.cast(correct_prediction, tf.float32)
   return correct_prediction
 
+def correct_predictions_multiclass(predictions, y_):
+	correct_prediction = tf.equal(tf.argmax(predictions, axis=1),  tf.argmax(y_, axis=1))
+	correct_prediction = tf.cast(correct_prediction, tf.float32)
+	return correct_prediction
+
 def mean_squared_error(truth, predicted):
   return tf.reduce_mean(tf.square(truth - predicted))
     

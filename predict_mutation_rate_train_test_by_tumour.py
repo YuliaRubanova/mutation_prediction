@@ -1,9 +1,6 @@
 #!/usr/bin/python
 # coding=utf-8
 
-# Predict a binary label -- if it is a true or false mutation -- depending on chromain features and mutation type
-
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -34,19 +31,19 @@ else:
 
 DEF_FEATURE_PATH = DIR + "dna_features_ryoga/"
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
-#mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
 mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
-model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.train_test_vaf.ckpt"
+feature_path = DIR + "/dna_features_ryoga/"
+model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.train_test_tumour.ckpt"
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
 
-session_conf = tf.ConfigProto(gpu_options=gpu_options)
-# session_conf = tf.ConfigProto(
-#     device_count={'CPU' : 1, 'GPU' : 0},
-#     allow_soft_placement=True,
-#     log_device_placement=False
-# )
+#session_conf = tf.ConfigProto()
+session_conf = tf.ConfigProto(
+    device_count={'CPU' : 1, 'GPU' : 0},
+    allow_soft_placement=True,
+    log_device_placement=False
+)
 
-def predict_true_false_mut_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
+def mutation_rate_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
 	n_samples = X.get_shape()[0].value
 	n_tumours = tumour_latents.get_shape()[0].value
@@ -79,7 +76,7 @@ def predict_true_false_mut_model_gaussian(X, y_, x_tumour_ids, tumour_latents, r
 
 	# make a different loss !!!! the loss is on the counts
 	with tf.name_scope('loss'):
-		cross_entropy_all = -tf.reduce_sum(y_ * log_y_prediction, reduction_indices=[1]) # gaussian
+		cross_entropy_all = -tf.reduce_sum(y_ * log_y_prediction + (1-y_)* tf.log(1-tf.exp(log_y_prediction)), reduction_indices=[1]) # gaussian
 	cross_entropy = tf.reduce_mean(cross_entropy_all)
 
 	with tf.name_scope('accuracy'):
@@ -90,7 +87,7 @@ def predict_true_false_mut_model_gaussian(X, y_, x_tumour_ids, tumour_latents, r
 	return log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, L, normalize_per_sample
 
 
-def predict_true_false_mut_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
+def mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
 	n_samples = X.get_shape()[0].value
 	z_latent_dim = reg_latent_dim*2
@@ -101,12 +98,9 @@ def predict_true_false_mut_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_lat
 
 	z_t = tf.squeeze(tf.gather_nd(tumour_latents, x_tumour_ids))
 
-	#prob_nn = init_neural_net_params([x_dim + z_latent_dim] + [200, 200, 1])
-	prob_nn = init_neural_net_params([x_dim] + [200, 200, 1])
+	prob_nn = init_neural_net_params([x_dim + z_latent_dim] + [200, 200, 1])
 
-	#p = neural_net(tf.concat([X, z_t], 1), prob_nn['weights'], prob_nn['biases'])
-	p = neural_net(tf.concat([X], 1), prob_nn['weights'], prob_nn['biases'])
-
+	p = neural_net(tf.concat([X, z_t], 1), prob_nn['weights'], prob_nn['biases'])
 	log_y_prediction = tf.reshape(p, [-1,1])
 
 	# make a different loss !!!! the loss is on the counts
@@ -130,9 +124,9 @@ def make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_pat
 	tumour_latents = tf.transpose(tf.tile(initial_tumour_latents, [1,n_unique_tumours]))
 
 	if model_type == "gaussian":
-		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, L, normalize_per_sample =  predict_true_false_mut_model_gaussian(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
+		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, L, normalize_per_sample =  mutation_rate_model_gaussian(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
 	else:
-		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions =  predict_true_false_mut_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
+		log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions =  mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
 
 	with tf.name_scope('adam_optimizer'):
 		train_step = tf.train.AdamOptimizer(adam_rate).minimize(cross_entropy)
@@ -150,31 +144,26 @@ def make_model(x_dim, n_unique_tumours, z_latent_dim, model_type, model_save_pat
 
 	return tf_vars, metrics, meta, extra
 
-def train(tf_vars, n_epochs, batch_size, model_save_path, available_tumours):
+def train(tumour_files_train, tumour_files_test, tf_vars, n_epochs, batch_size, model_save_path):
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
 
-	training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours)
+	x_test, y_test, n_unique_tumours_test, x_tumour_ids_test, time_estimates_test, mut_annotation, feature_names = read_tumour_data(tumour_files_test)
+	test_dict = {x: x_test, y_: y_test, x_tumour_ids: x_tumour_ids_test}
+
 	print("Optimizing...")
-	# config=tf.ConfigProto(gpu_options=gpu_options)
 	# config=session_conf
 	with tf.Session(config=session_conf) as sess:
 		sess.run(tf.global_variables_initializer())
 		for j in range(n_epochs):
-			for k in range(len(available_tumours) // n_tumours_per_batch+1):
-				if n_tumours_per_batch < len(available_tumours):
-					training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours, n_tumours_per_batch, k)
-					if training_set is None:
-						continue # no samples in a batch
-
-				# Split dataset into train / test
-				x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, tumour_ids], split_by = mut_vaf, test_size=0.2)
-				train_dict = {x: x_train, y_: y_train, x_tumour_ids: x_tumour_ids_train}
-				test_dict = {x: x_test, y_: y_test, x_tumour_ids: x_tumour_ids_test}
+			for k in range(len(tumour_files_train) // n_tumours_per_batch + (len(tumour_files_train) % n_tumours_per_batch != 0)):
+				x_train, y_train, n_unique_tumours, x_tumour_ids_train, time_estimates_train, mut_annotation, feature_names = read_tumour_data(tumour_files_train, n_tumours_per_batch, k)
 				train_data = [x_train, y_train, x_tumour_ids_train]
+				train_dict = {x: x_train, y_: y_train, x_tumour_ids: x_tumour_ids_train}
 
 				for i in range(x_train.shape[0] //batch_size+1):
 					x_batch, y_batch, x_tumour_ids_batch = get_batch(train_data, batch_size, i)
 					batch_dict = {x: x_batch, y_: y_batch, x_tumour_ids: x_tumour_ids_batch}
+
 					# print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
 					# print('train accuracy %g' % accuracy.eval(feed_dict=train_dict))
 					# print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
@@ -214,12 +203,12 @@ if __name__ == '__main__':
 	#parser.add_argument('--loss', help = "loss type: poisson or mean_squared", default="poisson")
 	parser.add_argument('-f', '--feature-path', help='feature file path', default=DEF_FEATURE_PATH)
 	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=100,type=int)
-	parser.add_argument('-a', '--adam', help='Rate for adam optimizer', default=1e-4,type=float)
+	parser.add_argument('-a', '--adam', help='Rate for adam optimizer', default=1e-3,type=float)
 
 	args = parser.parse_args()
 	test_mode = args.test
 	n_tumours = args.tumours
-	target_n_mut = args.mut
+	n_mut = args.mut
 	n_epochs = int(args.epochs)
 	batch_size = int(args.batch)
 	model_type = args.model
@@ -232,9 +221,10 @@ if __name__ == '__main__':
 	# model params
 	reg_latent_dim = 100
 	z_latent_dim = reg_latent_dim * 2
-	n_tumours_per_batch = 51 # tumours in tumour_batch
 
-	print(target_n_mut)
+	n_tumours_per_batch = 40 # tumours in tumour_batch
+
+	print(n_mut)
 
 	n_parts_to_load = 1000
 	if n_tumours is not None:
@@ -254,11 +244,12 @@ if __name__ == '__main__':
 
 	unique_tumours = unique_tumours[:n_tumours]
 	available_tumours = [dataset_with_annotation.replace("{id}", tum) for tum in unique_tumours]
-
+	
 	print(mut_features.shape)
+	print(n_mut)
 
 	n_mut, num_features, n_unique_tumours = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size, dataset_with_annotation, max_tumours = n_tumours)
-	mut_features, region_counts, n_mut = filter_mutation(mut_features, region_counts, target_n_mut)
+	mut_features, region_counts, n_mut = filter_mutation(mut_features, region_counts, n_mut)
 
 	print(mut_features.shape)
 	print(n_mut)
@@ -275,13 +266,15 @@ if __name__ == '__main__':
 	cross_entropy, accuracy = metrics
 	train_step, saver = meta
 	
+	tumour_files_train, tumour_files_test = model_selection.train_test_split(available_tumours, test_size=0.2, random_state = 1991)
+
 	if model_type == "gaussian":
 		z_t, y_region, predictions, L = extra
 	else: 
 		z_t, y_region, predictions = extra
 
 	if not test_mode:
-		train(tf_vars, n_epochs, batch_size, model_save_path, available_tumours)
+		train(tumour_files_train, tumour_files_test, tf_vars, n_epochs, batch_size, model_save_path)
 	else:
 		if not os.path.exists(model_save_path):
 			print("Model folder not found: " + model_save_path)
@@ -290,8 +283,10 @@ if __name__ == '__main__':
 		with tf.Session() as sess:
 			saver.restore(sess, model_save_path)
 
-			training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours)
-			x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, tumour_ids], split_by = mut_vaf, test_size=0.2)
+			# make test dictionary separately for this mode!!!!!!!!
+
+			x_test, y_test, n_unique_tumours_test, x_tumour_ids_test, time_estimates_test, mut_annotation, feature_names = read_tumour_data(tumour_files_test, n_tumours_per_batch, 0)
+			test_data = [x_test, y_test, x_tumour_ids_test, time_estimates_test]
 			test_dict = {x: x_test, y_: y_test, x_tumour_ids: x_tumour_ids_test}
 
 			print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
