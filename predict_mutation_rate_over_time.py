@@ -31,13 +31,23 @@ else:
 
 DEF_FEATURE_PATH = DIR + "/dna_features_ryoga/"
 
+# notes: use the RNN with latent layer to predict the batch of mutation types + features
+
 #dataset_path = DIR + "/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
 mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
 feature_path = DIR + "/dna_features_ryoga/"
-model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.ckpt"
+file_name = os.path.basename(__file__)[:-3]
+model_save_path = "trained_models/model." + file_name + ".tumours{}.mut{}/model.ckpt"
 # dataset_with_annotation = DIR + "mutation_prediction_data/region_dataset.small.over_time.annotation.hdf5"
 # datasets with at most 10000 mutations per tumour
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
+
+#session_conf = tf.ConfigProto(gpu_options=gpu_options)
+session_conf = tf.ConfigProto(
+    device_count={'CPU' : 20, 'GPU' : 0},
+    allow_soft_placement=True,
+    log_device_placement=False
+)
 
 def evaluate_on_each_tumour(x_data, tumours_data, time_estimates_data, metric):
 	evaluated_metric = 0
@@ -79,8 +89,8 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 	#encoder = init_neural_net_params([ batch_size_per_tp * num_features + z_latent_dim] + [500, 500, lstm_size])
 	encoder_data = init_neural_net_params([num_features] + [500, 500, reg_latent_dim])
 	#encoder_latents = init_neural_net_params([ batch_size_per_tp * reg_latent_dim] + [500, 500, lstm_size])
-	next_state_nn = init_neural_net_params([batch_size_per_tp * reg_latent_dim + lstm_size + 1, 500, 500, lstm_size])
-	decoder_latents = init_neural_net_params([lstm_size, 500, 500, reg_latent_dim * 2])
+	next_state_nn = init_neural_net_params([batch_size_per_tp * reg_latent_dim + lstm_size + 1, 100, 100, lstm_size])
+	decoder_latents = init_neural_net_params([lstm_size, 100, 100, reg_latent_dim * 2])
 	#next_state_gaussian_nn = init_neural_net_params([ batch_size_per_tp * reg_latent_dim] + [500, 500, reg_latent_dim * 2])
 	decoder_data = init_neural_net_params([reg_latent_dim, 500, 500, num_features])
 
@@ -89,9 +99,6 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 	reconstruction_next_batch_loss = tf.Variable(tf.constant(0.0, shape=[1]), trainable=False)
 	mse =  tf.Variable(tf.constant(0.0, shape=[1]), trainable=False)
 	mse_sum = []
-
-	# !!! do we need this rescaler ?? !!!
-	rescaler = tf.constant(-0.919* reg_latent_dim * batch_size_per_tp, dtype=tf.float32)
 
 	prediction_means = []
 
@@ -107,15 +114,15 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 		
 		latents = tf.reshape(latents, [sequences_per_batch_tf, batch_size_per_tp * reg_latent_dim])
 
-		print("hello")
-		print(prev_hidden_state.get_shape())
-		print(latents.get_shape())
-		print(vaf.get_shape())
-		print(lstm_size)
-		print(reg_latent_dim)
-		print(batch_size_per_tp)
-		print(batch_size_per_tp * reg_latent_dim + lstm_size + 1)
-		print(tf.concat([prev_hidden_state, latents, vaf], 1).get_shape())
+		# print("hello")
+		# print(prev_hidden_state.get_shape())
+		# print(latents.get_shape())
+		# print(vaf.get_shape())
+		# print(lstm_size)
+		# print(reg_latent_dim)
+		# print(batch_size_per_tp)
+		# print(batch_size_per_tp * reg_latent_dim + lstm_size + 1)
+		# print(tf.concat([prev_hidden_state, latents, vaf], 1).get_shape())
 
 		#hidden_state = neural_net(latents, encoder_latents['weights'], encoder_latents['biases'])
 		next_state = neural_net(tf.concat([tf.squeeze(prev_hidden_state), latents, vaf], 1), next_state_nn['weights'], next_state_nn['biases'])
@@ -124,7 +131,7 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 		predicted_region_gaussian = neural_net(next_state, decoder_latents['weights'], decoder_latents['biases'])
 		#predicted_region_gaussian = neural_net(latents, next_state_gaussian_nn['weights'], next_state_gaussian_nn['biases'])
 
-		predicted_batch_mean, predicted_log_batch_sigma = unpack_gaussian(predicted_region_gaussian, reg_latent_dim)
+		predicted_batch_mean, predicted_batch_sigma = unpack_gaussian(predicted_region_gaussian, reg_latent_dim)
 
 		# taking the mean of the gaussian and comparing it to the batch
 		# !!!! taking the mean, not the gaussian
@@ -139,25 +146,27 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 		next_batch_reconstruction = neural_net(next_batch_latents, decoder_data['weights'], decoder_data['biases'])
 		#next_batch_reconstruction = tf.expand_dims(tf.reshape(next_batch_reconstruction, [1,-1]),0)
 
-		print("check")
-		print(batch.get_shape())
-		print(next_batch.get_shape())
-		print(next_state.get_shape())
-		print(predicted_region_gaussian.get_shape())
-		print(predicted_batch_mean.get_shape())
-		print(next_batch_latents.get_shape())
-		print(next_batch_reconstruction.get_shape())
+		# print("check")
+		# print(batch.get_shape())
+		# print(next_batch.get_shape())
+		# print(next_state.get_shape())
+		# print(predicted_region_gaussian.get_shape())
+		# print(predicted_batch_mean.get_shape())
+		# print(next_batch_latents.get_shape())
+		# print(next_batch_reconstruction.get_shape())
 
-		dist = tf.contrib.distributions.MultivariateNormalDiag(predicted_batch_mean, tf.abs(predicted_log_batch_sigma)) #tf.exp(predicted_log_batch_sigma)) #tf.ones([reg_latent_dim]))# tf.abs(batch_sigma))
+		dist = tf.contrib.distributions.MultivariateNormalDiag(predicted_batch_mean, tf.maximum(tf.abs(predicted_batch_sigma), tf.constant(5.0))) #tf.abs(predicted_batch_sigma)) #tf.ones([reg_latent_dim]))# tf.abs(batch_sigma))
 		next_batch_latents = tf.reshape(next_batch_latents, [sequences_per_batch_tf, batch_size_per_tp, reg_latent_dim])
 		
-		L = tf.reduce_mean(dist.log_prob(tf.transpose(next_batch_latents,(1,0,2))) - rescaler, axis=0)
-		L = L * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / time_series_lengths
+		L = tf.reduce_mean(dist.log_prob(tf.transpose(next_batch_latents,(1,0,2))), axis=0)
+		L = L * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths - 1)
+
+		mse_batch = mean_squared_error(batch, reconstruction) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths - 1)
+		mse_next_batch = mean_squared_error(next_batch, next_batch_reconstruction) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths - 1)
 
 		log_likelihood = tf.add(log_likelihood, L)
-
-		reconstruction_loss = tf.add(reconstruction_loss, mean_squared_error(batch, reconstruction))
-		reconstruction_next_batch_loss = tf.add(reconstruction_next_batch_loss, mean_squared_error(next_batch, next_batch_reconstruction))
+		reconstruction_loss = tf.add(reconstruction_loss, mse_batch)
+		reconstruction_next_batch_loss = tf.add(reconstruction_next_batch_loss, mse_next_batch)
 
 	# hidden_state = tf.zeros([batch_size_per_tp, lstm.state_size])
 	# current_state = tf.zeros([batch_size_per_tp, lstm.state_size])
@@ -179,7 +188,7 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 
 	predictions = tf.concat(tf.expand_dims(prediction_means, 0), 0)
 
-	return tf.reduce_mean(log_likelihood), reconstruction_loss, reconstruction_next_batch_loss, predicted_log_batch_sigma, predictions
+	return tf.reduce_mean(log_likelihood), tf.reduce_mean(reconstruction_loss), tf.reduce_mean(reconstruction_next_batch_loss), predicted_batch_sigma, predictions
 
 def make_model(num_features, n_unique_tumours, z_latent_dim, time_steps, batch_size_per_tp, lstm_size, model_save_path, adam_rate = 1e-3):
 	x = tf.placeholder(tf.float32, [time_steps, None, batch_size_per_tp, num_features])
@@ -191,11 +200,11 @@ def make_model(num_features, n_unique_tumours, z_latent_dim, time_steps, batch_s
 	initial_tumour_latents = tf.abs(tf.concat([weight_variable([z_latent_dim//2,1]), weight_variable([z_latent_dim//2,1], mean=1)], axis = 0))
 	tumour_latents = tf.transpose(tf.tile(initial_tumour_latents, [1,n_unique_tumours]))
 
-	log_likelihood, reconstr_before, reconstr_after, predicted_log_batch_sigma, predictions= \
+	log_likelihood, reconstr_before, reconstr_after, predicted_batch_sigma, predictions= \
 		mutation_rate_model_over_time(x, time_estimates, time_series_lengths, tumour_id, tumour_latents, lstm_size, reg_latent_dim, time_steps, batch_size_per_tp, sequences_per_batch_tf)
 	
-	#cost = -log_likelihood + 0.01*(reconstr_before + reconstr_after) + tf.maximum(tf.constant(-10000.0), tf.reduce_mean(predicted_log_batch_sigma))
-	cost = reconstr_before + reconstr_after
+	cost = -log_likelihood + reconstr_before + reconstr_after + tf.reduce_sum(tf.abs(predicted_batch_sigma))
+	#cost = reconstr_before + reconstr_after
 
 	with tf.name_scope('adam_optimizer'):
 		train_step = tf.train.AdamOptimizer(adam_rate).minimize(cost)
@@ -207,14 +216,15 @@ def make_model(num_features, n_unique_tumours, z_latent_dim, time_steps, batch_s
 	tf_vars = [x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions]
 	metrics = [log_likelihood, cost]
 	meta = [train_step, saver]
-	extra = []
+	extra = [reconstr_before, reconstr_after, predicted_batch_sigma]
 
 	return tf_vars, metrics, meta, extra
 
-def train(tf_vars, metrics, n_epochs, model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps):
+def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps):
 	x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
 	log_likelihood, cost = metrics
 	train_step, saver = meta
+	reconstr_before, reconstr_after, predicted_batch_sigma = extra
 
 	test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, annot, features = read_tumour_data(tumour_files_test)
 	x_test, tumours_test, time_estimates_test = make_batches_over_time(test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, batch_size_per_tp, n_unique_tumours_test, n_timesteps)
@@ -227,8 +237,24 @@ def train(tf_vars, metrics, n_epochs, model_save_path, tumour_files_train, tumou
 	sequences_per_batch = x_train.shape[2]
 
 	print("Optimizing...")
-	with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
+	with tf.Session(config=session_conf) as sess:
 		sess.run(tf.global_variables_initializer())
+
+		train_log_likelihood = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, log_likelihood)
+		print('Initial')
+		print('training log_likelihood %g' % (train_log_likelihood))
+		test_ll = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, log_likelihood)
+		print('test log_likelihood %g' % test_ll)
+		print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, cost))
+		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost)
+		print('test cost %g' % cost_test)
+		print('train reconstr_before %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, reconstr_before))
+		print('test reconstr_before %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, reconstr_before))
+		print('train reconstr_after %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, reconstr_after))
+		print('test reconstr_after %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, reconstr_after))
+		print('train predicted_batch_sigma %g' % np.mean(abs(evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, predicted_batch_sigma))))
+		print('test predicted_batch_sigma %g' % np.mean(abs(evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, predicted_batch_sigma))))
+
 
 		for j in range(n_epochs):
 				for k in range(len(tumour_files_train) // n_tumours_per_batch+1):
@@ -262,6 +288,15 @@ def train(tf_vars, metrics, n_epochs, model_save_path, tumour_files_train, tumou
 					cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost)
 					print('test cost %g' % cost_test)
 				
+					print('train reconstr_before %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, reconstr_before))
+					print('test reconstr_before %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, reconstr_before))
+
+					print('train reconstr_after %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, reconstr_after))
+					print('test reconstr_after %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, reconstr_after))
+
+					print('train predicted_batch_sigma %g' % np.mean(abs(evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, predicted_batch_sigma))))
+					print('test predicted_batch_sigma %g' % np.mean(abs(evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, predicted_batch_sigma))))
+
 					#if j % 5 == 0:
 				# 		model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
 				# 		save_path = saver.save(sess, model_save_path_tmp)
@@ -269,6 +304,9 @@ def train(tf_vars, metrics, n_epochs, model_save_path, tumour_files_train, tumou
 
 		test_ll = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, log_likelihood)
 		print('test log_likelihood %g' % test_ll)
+	
+		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost)
+		print('test cost %g' % cost_test)
 	
 		save_path = saver.save(sess, model_save_path)
 		print("Model saved in file: %s" % save_path)
@@ -304,7 +342,7 @@ if __name__ == '__main__':
 	# model params
 	# number of mutation per time point batch
 	batch_size_per_tp=120
-	sequences_per_batch = 8
+	sequences_per_batch = 10
 	n_tumours_per_batch = 100 # tumours in tumour_batch
 	# size of region latents
 	reg_latent_dim = 80
@@ -351,12 +389,13 @@ if __name__ == '__main__':
 	x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
 	log_likelihood, cost = metrics
 	train_step, saver = meta
+	reconstr_before, reconstr_after, predicted_batch_sigma = extra
 
 	# # Split dataset into train / test
 	tumour_files_train, tumour_files_test = model_selection.train_test_split(available_tumours, test_size=0.2, random_state = 1991)
 
 	if not test_mode:
-		train(tf_vars, metrics, n_epochs , model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps)
+		train(tf_vars, metrics, meta, extra, n_epochs , model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps)
 	else:
 		if not os.path.exists(model_save_path):
 			print("Model folder not found: " + model_save_path)
@@ -385,6 +424,41 @@ if __name__ == '__main__':
 			print(len(collected_predictions))
 			print(np.array(collected_predictions).shape)
 			print(collected_predictions[0][0][0][0][:96])
+
+			collected_predictions = np.squeeze(collected_predictions)
+
+			print("Difference between predictions within a tumour:")
+			print(collected_predictions[:,0,:96])
+			print(collected_predictions[:,1,:96])
+
+			print("std")
+			print(np.apply_along_axis(np.std, 0, collected_predictions[:,0,:96]))
+			print(np.apply_along_axis(np.std, 0, collected_predictions[:,1,:96]))
+
+			def find_max_diff(x):
+				return max(x) - min(x)
+
+			print("max diff")
+			print(np.apply_along_axis(find_max_diff, 0, collected_predictions[:,0,:96]))
+			print(np.apply_along_axis(find_max_diff, 0, collected_predictions[:,1,:96]))
+
+			print("Difference in predictions across tumours:")
+			print("Early")
+			print(collected_predictions[0,0,:96] - collected_predictions[0,1,:96])
+
+			print("Middle")
+			print(collected_predictions[15,0,:96] - collected_predictions[15,1,:96])
+
+			print("Late")
+			print(collected_predictions[28,0,:96] - collected_predictions[28,1,:96])
+
+			# How far are the predicted mutations from real ones (at least some in the batch?)
+
+
+			# If we sample from a gaussian of predicted latents and decode, are the predicted mutations close to at least any of real mutations?
+
+
+
 
 			# print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
 			# print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))

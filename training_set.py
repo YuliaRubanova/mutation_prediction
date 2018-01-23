@@ -150,45 +150,41 @@ def read_tumour_data(files, tumour_batch_size = None, start = 0):
 	if len(files) == 0:
 		return None, None, None, None, None, None, None
 
-	training_set = labels = x_tumour_ids = mut_vaf = np.array([])
+	training_set = []
+	labels = []
+	x_tumour_ids = []
+	mut_vaf = []
 	n_unique_tumours = 0
 	mut_annotation = feature_names = None
 
-	dictionary = load_from_HDF(files[0])
-	training_set = dictionary["training_set"]
-	labels = np.squeeze(dictionary["labels"])
-	n_unique_tumours += int(dictionary["n_unique_tumours"])
-	x_tumour_ids = dictionary["x_tumour_ids"]
-	mut_vaf = dictionary["mut_vaf"]
 
-	pickle_annotation_file = files[0][:-len(".annotation.hdf5")] + ".feature_annotation.pickle"
-	
-	if os.path.exists(pickle_annotation_file):
-		mut_annotation, feature_names = load_pickle(pickle_annotation_file)
-	else:
-		print("Warning! "+ pickle_annotation_file + " does not exist")
-
-	for file in files[1:]:
+	for file in files:
 		dictionary = load_from_HDF(file)
-		training_set = np.concatenate((training_set, dictionary["training_set"]), axis=0)
-		labels = np.concatenate((labels, np.squeeze(dictionary["labels"])))
+		training_set.append(dictionary["training_set"])
+		labels.append(np.squeeze(dictionary["labels"]))
 		n_unique_tumours += int(dictionary["n_unique_tumours"])
-		x_tumour_ids = np.concatenate((x_tumour_ids, dictionary["x_tumour_ids"]))
-		mut_vaf = np.concatenate((mut_vaf, dictionary["mut_vaf"]))
+		x_tumour_ids.append(dictionary["x_tumour_ids"])
+		mut_vaf.append(dictionary["mut_vaf"])
 
 		pickle_annotation_file = file[:-len(".annotation.hdf5")] + ".feature_annotation.pickle"
 
 		if os.path.exists(pickle_annotation_file):
-			mut_annot_cur, feature_names_cur = load_pickle(pickle_annotation_file)
+			mut_annot_cur, feature_names = load_pickle(pickle_annotation_file)
 			mut_annotation = pd.concat((mut_annotation, mut_annot_cur))
 		else:
 			print("Warning! "+ pickle_annotation_file + " does not exist")
+
+	training_set = np.concatenate(training_set, axis = 0)
+	labels = np.concatenate(labels)
+	x_tumour_ids = np.concatenate(x_tumour_ids)
+	mut_vaf = np.concatenate(mut_vaf)
 
 	if not(mut_annotation.shape[0] == training_set.shape[0] and len(feature_names) == training_set.shape[1]):
 		raise Exception("ERROR: Dataset is incorrect: all parts should contain the same number of samples")
 
 	labels = labels[:,np.newaxis]
 
+	print("Data has been read.")
 	return training_set, labels, n_unique_tumours, x_tumour_ids, mut_vaf, mut_annotation, feature_names
 
 def downsample_data(tumour_data, target_mut_features):
@@ -217,6 +213,7 @@ def downsample_data(tumour_data, target_mut_features):
 
 def make_batches_over_time(dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, sequences_per_batch, n_timesteps):
 	# Using only positive examples
+	
 	positive_examples = np.where(region_counts.ravel() > 0)[0]
 	dataset = dataset[positive_examples]
 	tumour_ids = tumour_ids[positive_examples]
@@ -306,3 +303,90 @@ def make_set_for_predicting_mut_rate(training_set, labels, mut_annotation, featu
 	training_set, labels = region_features, mut_types
 
 	return training_set, labels
+
+
+def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, sequences_per_batch, n_timesteps):
+	# Using only positive examples
+	positive_examples = np.where(region_counts.ravel() > 0)[0]
+	dataset = dataset[positive_examples]
+	tumour_ids = tumour_ids[positive_examples]
+	mut_vaf = mut_vaf[positive_examples]
+
+	unique_tumours = np.unique(tumour_ids)
+	np.random.shuffle(unique_tumours)
+	
+	all_tumours = []
+	all_time_estimates = []
+	tumour_name_batch = []
+	
+	n_tumour_batches = 1
+	if len(unique_tumours) > sequences_per_batch:
+		n_tumour_batches = len(unique_tumours) // sequences_per_batch
+
+	for t_batch_ind in range(n_tumour_batches):
+		tumour_batch = []
+		tumour_batch_time_estimates = []
+		tumour_names = []
+		batch_size = min(sequences_per_batch, len(unique_tumours) - t_batch_ind * sequences_per_batch)
+		print(batch_size)
+		if batch_size == 0:
+			next
+		for k in range(batch_size):
+			tum = unique_tumours[t_batch_ind * sequences_per_batch + k]
+
+			data_cur = dataset[np.where(tumour_ids == tum)[0]]
+			mut_vaf_cur = mut_vaf[np.where(tumour_ids == tum)[0]]
+			tumour_ids_cur = tumour_ids[np.where(tumour_ids == tum)[0]]
+
+			mut_vaf_cur = mut_vaf_cur.astype(float)
+			sort_order = mut_vaf_cur.argsort()[::-1]
+			data_cur = data_cur[sort_order]
+			mut_vaf_cur = mut_vaf_cur[sort_order]
+			n_mut = len(mut_vaf_cur)
+
+			tumour_data = []
+			time_estimates = []
+
+			time_steps_in_tumour = n_mut // batch_size_per_tp
+
+			for i in range(min(n_timesteps,time_steps_in_tumour)):
+				time_estimates.append(np.mean(mut_vaf_cur[i * batch_size_per_tp : (i+1) * batch_size_per_tp]))
+				mut_types = data_cur[i * batch_size_per_tp : (i+1) * batch_size_per_tp,:96]
+				mut_types = (np.sum(mut_types, axis =0)/sum(np.sum(mut_types, axis =0)))[np.newaxis,:]
+				tumour_data.append(mut_types)
+
+			if n_timesteps > time_steps_in_tumour:
+				shape = np.array(tumour_data).shape[1:]
+				shape = (n_timesteps-time_steps_in_tumour, shape[0], shape[1])
+
+				time_estimates.extend(np.zeros(n_timesteps-time_steps_in_tumour).tolist())
+				tumour_data.extend(np.zeros(shape).tolist())
+
+			tumour_batch.append(tumour_data)
+			tumour_batch_time_estimates.append(np.array(time_estimates)[:,np.newaxis].tolist())
+			tumour_names.append(tum)
+
+		all_tumours.append(tumour_batch)
+		all_time_estimates.append(tumour_batch_time_estimates)
+		tumour_name_batch.append(tumour_names)
+
+	# index of tumour batch is 0th dimension
+	# over time is 1th dimension
+	# batch of several tumours is 2nd dimension
+	# number of mutations per time point is 3rd
+	all_tumours = np.transpose(np.array(all_tumours), (0,2,1,3,4))
+	all_time_estimates = np.transpose(np.array(all_time_estimates), (0,2,1,3))
+
+	# !!!! how to avoid using the same length all the time?
+	#truncate_to = min([x.shape[0] for x in all_time_estimates])
+	# truncate_to = 3
+	# all_time_estimates = [x[:truncate_to] for x in all_time_estimates]
+	# all_tumours = [x[:truncate_to] for x in all_tumours]
+
+	print("total")
+	print(np.array(all_tumours).shape)
+	print(np.array(all_time_estimates).shape)
+
+	return np.array(all_tumours), tumour_name_batch, np.array(all_time_estimates)
+
+

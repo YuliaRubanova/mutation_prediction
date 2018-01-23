@@ -96,7 +96,7 @@ def save_graph():
 	train_writer = tf.summary.FileWriter(graph_location)
 	train_writer.add_graph(tf.get_default_graph())
 
-def init_neural_net_params(layer_sizes):
+def init_neural_net_params(layer_sizes, stddev = 0.1, bias = 0.1):
 	"""Build a list of (weights, biases) tuples,
 		 one for each layer in the net."""
 	weights = []
@@ -104,8 +104,8 @@ def init_neural_net_params(layer_sizes):
 
 	for i, (m, n) in enumerate(list(zip(layer_sizes[:-1], layer_sizes[1:]))):
 		print((m,n))
-		weights.append(weight_variable([m, n]))
-		biases.append(bias_variable([n]))
+		weights.append(weight_variable([m, n], stddev = stddev))
+		biases.append(bias_variable([n], value = bias))
 
 	return {'weights': weights, 'biases': biases}
 

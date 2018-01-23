@@ -19,6 +19,7 @@ from get_annotation_for_mutation_regions import *
 import pandas as pd
 import glob
 from training_set import *
+from plot_signatures import *
 
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -39,12 +40,12 @@ mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour100
 model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.train_test_vaf.ckpt"
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
 
-session_conf = tf.ConfigProto(gpu_options=gpu_options)
-# session_conf = tf.ConfigProto(
-#     device_count={'CPU' : 1, 'GPU' : 0},
-#     allow_soft_placement=True,
-#     log_device_placement=False
-# )
+#session_conf = tf.ConfigProto(gpu_options=gpu_options)
+session_conf = tf.ConfigProto(
+    device_count={'CPU' : 1, 'GPU' : 0},
+    allow_soft_placement=True,
+    log_device_placement=False
+)
 
 def predict_true_false_mut_model_gaussian(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
@@ -201,6 +202,36 @@ def train(tf_vars, n_epochs, batch_size, model_save_path, available_tumours):
 		save_path = saver.save(sess, model_save_path)
 		print("Model saved in file: %s" % save_path)
 
+def visualize(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names, region_size):
+	# choose only true mutations
+
+	real_examples = np.where(labels.ravel() > 0)[0]
+	real_mutations = training_set[real_examples]
+	real_tumour_ids = tumour_ids[real_examples]
+	real_mut_vaf = mut_vaf[real_examples]
+
+	# plot distrubtion over types
+	mut_types = real_mutations[:,:96]
+	plot_mut_types(np.mean(mut_types, axis=0), "mut_types.pdf")
+
+	# plot distribution over features
+	real_mutations = np.reshape(real_mutations[:,96:], [real_mutations.shape[0], region_size, -1])
+	print(np.sum(real_mutations[:,:,:] > 0) / np.prod(real_mutations[:,:,:].shape))
+	# plot only features at the location of mutation (all feature types for all mutations)
+	non_zero_features = np.transpose(real_mutations[:,50,:]).tolist()
+	for i in range(len(non_zero_features)):
+		# transforming into log scale!!
+		non_zero_features[i] = [np.log(x) for x in non_zero_features[i] if x > 0]
+	plot_boxplot(non_zero_features, "region_features.pdf", np.reshape(feature_names[96:], [region_size, -1])[50])
+
+	# compare distr over types in different tumours
+
+	# plot distrubtion over types over time
+
+	# plot distribution over features for each type
+
+	# plot distribution over features for each tumour
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Train model to predict probability for region-mutation pair')
@@ -293,6 +324,8 @@ if __name__ == '__main__':
 			training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours)
 			x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, tumour_ids], split_by = mut_vaf, test_size=0.2)
 			test_dict = {x: x_test, y_: y_test, x_tumour_ids: x_tumour_ids_test}
+
+			visualize(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names, region_size)
 
 			print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
 			print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
