@@ -245,3 +245,11 @@ def sort_dict(dictionary):
 	for key in dictionary.keys():
 		dictionary[key] = sorted(dictionary[key])
 	return dictionary
+
+def sigmoid(x):
+  return 1 / (1 + np.exp(-x))
+
+def softmax(x, axis=None):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - (np.max(x, axis=axis)[:,:,np.newaxis]))
+    return e_x / e_x.sum(axis=axis)[:,:,np.newaxis]

@@ -13,6 +13,10 @@ import shutil
 
 feature_data = "/home/yulia/mnt/dna_features_ryoga/"
 
+def check(var): 
+	print((var).get_shape())
+	quit()
+	
 def read_psub(filename):
 	"""
 	:param filename: chr_pos=phi/vaf

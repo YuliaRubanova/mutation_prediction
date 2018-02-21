@@ -312,7 +312,7 @@ def fill_data_for_region(interval, sorted_region_list, func_fill_data = fill_bin
 	Returns the binary array. The element of the returned array with be equal to 1 if this position overlaps some region in sorted_region_list, and 0 otherwise
 	"""
 	# by default fill with data as if it is not covered by any region from the list
-	data = [func_fill_data()] * (interval[1] - interval[0])
+	data = [func_fill_data()] * (interval[1]  - interval[0] + 1)
 
 	ind_region, region = find_closest_region(interval, sorted_region_list)
 	if ind_region == -1:
@@ -323,14 +323,19 @@ def fill_data_for_region(interval, sorted_region_list, func_fill_data = fill_bin
 	while start_index >= 0 and sorted_region_list[start_index][0] > interval[0]:
 		start_index -= 1
 	start_index = max(0, start_index)
+	if sorted_region_list[start_index][1] < interval[0]:
+		start_index += 1
 
 	while end_index < len(sorted_region_list) and sorted_region_list[end_index][1] < interval[1]:
 		end_index += 1
 	end_index = min(end_index, len(sorted_region_list)-1)
+	if sorted_region_list[end_index][0] > interval[1]:
+		end_index -= 1
 
 	for index in range(start_index, end_index+1):
-		start = max(sorted_region_list[index][0], interval[0]) - interval[0] - 1
-		end = min(sorted_region_list[index][1], interval[1]) - interval[0] - 1
+		start = max(sorted_region_list[index][0], interval[0]) - interval[0]
+		end = min(sorted_region_list[index][1], interval[1]) - interval[0]
+
 		# fill with data corresponding to the region. Each element can be a list or interger
 		for i in range(start, end+1):
 			tmp = func_fill_data(sorted_region_list[index])
