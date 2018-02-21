@@ -18,6 +18,7 @@ from get_annotation_for_mutation_regions import *
 import pandas as pd
 import glob
 from training_set import *
+from generate_data_mutations_only import generate_random_mutations
 
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -35,15 +36,17 @@ DEF_FEATURE_PATH = DIR + "dna_features_ryoga/"
 #dataset_path = "/Users/yulia/Documents/mutational_signatures/mutation_prediction_data/region_dataset.regionsize1000.small.pickle"
 #mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
 mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
-model_save_path = "trained_models/model.region_dataset.model{}.tumours{}.mut{}/model.train_test_vaf.ckpt"
+file_name = os.path.basename(__file__)[:-3]
+model_dir = "trained_models/model." + file_name + ".tumours{}.mut{}/"
+model_save_path = model_dir + "model.ckpt"
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
 
-#session_conf = tf.ConfigProto(gpu_options=gpu_options)
-session_conf = tf.ConfigProto(
-    device_count={'CPU' : 1, 'GPU' : 0},
-    allow_soft_placement=True,
-    log_device_placement=False
-)
+session_conf = tf.ConfigProto(gpu_options=gpu_options)
+# session_conf = tf.ConfigProto(
+#     device_count={'CPU' : 1, 'GPU' : 0},
+#     allow_soft_placement=True,
+#     log_device_placement=False
+# )
 
 def predict_mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_latent_dim):
 	x_dim = X.get_shape()[1].value
@@ -57,9 +60,11 @@ def predict_mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_late
 
 	z_t = tf.squeeze(tf.gather_nd(tumour_latents, x_tumour_ids))
 
-	prob_nn = init_neural_net_params([x_dim + z_latent_dim] + [200, 200, n_types])
+	#prob_nn = init_neural_net_params([x_dim + z_latent_dim] + [200, 200, n_types])
+	prob_nn = init_neural_net_params([x_dim] + [200, 200, n_types])
 
-	log_y_prediction = neural_net(tf.concat([X, z_t], 1), prob_nn['weights'], prob_nn['biases'])
+	#log_y_prediction = neural_net(tf.concat([X, z_t], 1), prob_nn['weights'], prob_nn['biases'])
+	log_y_prediction = neural_net(X, prob_nn['weights'], prob_nn['biases'])
 
 	with tf.name_scope('loss'):
 		cross_entropy_all = tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=log_y_prediction) # neural net
@@ -152,7 +157,8 @@ if __name__ == '__main__':
 	#parser.add_argument('--loss', help = "loss type: poisson or mean_squared", default="poisson")
 	parser.add_argument('-f', '--feature-path', help='feature file path', default=DEF_FEATURE_PATH)
 	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=100,type=int)
-	parser.add_argument('-a', '--adam', help='Rate for adam optimizer', default=1e-4,type=float)
+	parser.add_argument('-a', '--adam', help='Rate for adam optimizer', default=1e-3,type=float)
+	parser.add_argument('--train-garbage', help='Make garbage features to test if region features have some signal', action="store_true")
 
 	args = parser.parse_args()
 	test_mode = args.test
@@ -164,6 +170,7 @@ if __name__ == '__main__':
 	feature_path = args.feature_path
 	region_size = args.region_size
 	adam_rate = args.adam
+	train_garbage = args.train_garbage
 	#latent_dimension = args.latents
 
 	print("Fitting model version: " + model_type)
@@ -204,10 +211,12 @@ if __name__ == '__main__':
 
 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
 
-	tumour_data = read_tumour_data(available_tumours)
-	training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = downsample_data(tumour_data, mut_features)
-	training_set, labels = make_set_for_predicting_mut_rate(training_set, labels, mut_annotation, feature_names)
+	training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours)
+
+	if (train_garbage):
+		training_set = np.array(generate_random_mutations(training_set.shape[0], "random", feature_names, 96, include_annotation = False))
 	
+	training_set, labels = make_set_for_predicting_mut_rate(training_set, labels, mut_annotation, feature_names)
 	n_region_features = training_set.shape[1]
 	n_mut_types = labels.shape[1]
 
@@ -215,7 +224,7 @@ if __name__ == '__main__':
 	print(labels.shape)
 
 	tf.reset_default_graph()
-	model_save_path = model_save_path.format(model_type, n_tumours, n_mut)
+	model_save_path = model_save_path.format(n_tumours, n_mut)
 	os.makedirs(model_save_path, exist_ok=True)
 
 	tf_vars, metrics, meta, extra = make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, model_type, model_save_path, adam_rate = adam_rate)
