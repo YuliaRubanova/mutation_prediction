@@ -41,7 +41,6 @@ DEF_FEATURE_PATH = DIR + "dna_features_ryoga/"
 mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
 file_name = os.path.basename(__file__)[:-3]
 model_dir = "trained_models/model." + file_name + ".tumours{}.mut{}/"
-model_save_path = model_dir + "model.ckpt"
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
 
 #session_conf = tf.ConfigProto(gpu_options=gpu_options)
@@ -418,40 +417,12 @@ if __name__ == '__main__':
 	z_latent_dim = reg_latent_dim * 2
 	n_tumours_per_batch = 51 # tumours in tumour_batch
 
-	print(target_n_mut)
-
-	n_parts_to_load = 1000
-	if n_tumours is not None:
-		n_parts_to_load = int(n_tumours)
-
-	print("Loading dataset...")
-	mut_features, region_counts = load_dataset(mut_dataset_path, n_parts = n_parts_to_load)
-	trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
-
-	dataset_with_annotation = dataset_with_annotation.format(region_size = region_size)
-	unique_tumours = np.unique(np.asarray(mut_features.Tumour).ravel())
-
-	if n_tumours is None:
-		n_tumours = len(unique_tumours)
-	else:
-		n_tumours = int(n_tumours)
-
-	unique_tumours = unique_tumours[:n_tumours]
-	available_tumours = [dataset_with_annotation.replace("{id}", tum) for tum in unique_tumours]
-
-	print(mut_features.shape)
-
-	n_mut, num_features, n_unique_tumours = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size, dataset_with_annotation, max_tumours = n_tumours)
-	mut_features, region_counts, n_mut = filter_mutation(mut_features, region_counts, target_n_mut)
-
-	print(mut_features.shape)
-	print(n_mut)
+	mut_features, unique_tumours, n_tumours, n_mut, available_tumours, num_features, n_unique_tumours = \
+		load_filter_dataset(mut_dataset_path, feature_path, dataset_with_annotation, region_size, n_tumours, n_mut)
 
 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
 
-	tf.reset_default_graph()
-	model_save_path = model_save_path.format(n_tumours, n_mut)
-	os.makedirs(model_save_path, exist_ok=True)
+	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut])
 
 	tf_vars, metrics, meta, extra = make_model(num_features, n_unique_tumours, z_latent_dim, model_type, model_save_path, adam_rate = adam_rate)
 

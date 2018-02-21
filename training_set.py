@@ -383,7 +383,6 @@ def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tu
 		tumour_batch_time_estimates = []
 		tumour_names = []
 		batch_size = min(sequences_per_batch, len(unique_tumours) - t_batch_ind * sequences_per_batch)
-		print(batch_size)
 		if batch_size == 0:
 			next
 		for k in range(batch_size):
@@ -438,10 +437,34 @@ def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tu
 	# all_time_estimates = [x[:truncate_to] for x in all_time_estimates]
 	# all_tumours = [x[:truncate_to] for x in all_tumours]
 
-	print("total")
 	print(np.array(all_tumours).shape)
 	print(np.array(all_time_estimates).shape)
 
 	return np.array(all_tumours), tumour_name_batch, np.array(all_time_estimates)
+
+def load_filter_dataset(mut_dataset_path, feature_path, dataset_with_annotation, region_size, n_tumours=None, n_mut=None, n_parts_to_load = 1000):
+	if n_tumours is not None:
+		n_parts_to_load = int(n_tumours)
+
+	print("Loading dataset...")
+	# region_counts -- counts of mutations of different types in the region surrounding the position of interest
+	mut_features, region_counts = load_dataset(mut_dataset_path, n_parts = n_parts_to_load)
+	trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
+
+	dataset_with_annotation = dataset_with_annotation.format(region_size = region_size)
+	unique_tumours = np.unique(np.asarray(mut_features.Tumour).ravel())
+
+	if n_tumours is None:
+		n_tumours = len(unique_tumours)
+	else:
+		n_tumours = int(n_tumours)
+
+	unique_tumours = unique_tumours[:n_tumours]
+	available_tumours = [dataset_with_annotation.replace("{id}", tum) for tum in unique_tumours]
+
+	n_mut_avail, num_features, n_unique_tumours = make_training_set(mut_features, region_counts, trinuc, feature_path, region_size, dataset_with_annotation, max_tumours = n_tumours)
+	mut_features, region_counts, n_mut_avail = filter_mutation(mut_features, region_counts, n_mut)
+
+	return mut_features, unique_tumours, n_tumours, n_mut_avail, available_tumours, num_features, n_unique_tumours
 
 

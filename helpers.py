@@ -5,6 +5,8 @@ import pandas as pd
 import h5py
 import os
 import csv
+import tensorflow as tf
+from shutil import copyfile
 
 def load_pickle(filename):
 	with open(filename, 'rb') as pkl_file:
@@ -253,3 +255,15 @@ def softmax(x, axis=None):
     """Compute softmax values for each sets of scores in x."""
     e_x = np.exp(x - (np.max(x, axis=axis)[:,:,np.newaxis]))
     return e_x / e_x.sum(axis=axis)[:,:,np.newaxis]
+
+def prepare_model_dir(call_args, model_dir, file_name, args):
+	tf.reset_default_graph()
+	model_dir = model_dir.format(*args)
+	model_save_path = model_dir + "model.ckpt"
+	os.makedirs(model_dir, exist_ok=True)
+	# copy current script to folder
+	copyfile(file_name, model_dir + os.path.basename(file_name))
+	# write the call to the folder
+	with open(model_dir + "call.txt", "w") as text_file:
+		text_file.write(" ".join(call_args))
+	return model_dir, model_save_path

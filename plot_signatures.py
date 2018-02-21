@@ -179,7 +179,7 @@ def plot_types_over_time(data, ylabel, plot_name = "tmp.pdf"):
 		ax.set_xlabel('Time')
 		ax.set_ylabel(ylabel)
 
-	#plt.tight_layout()
 	fig.set_size_inches((12, 5 * n_tumours))
+	plt.tight_layout()
 	fig.savefig(plot_name, format="pdf")
 	plt.close()
