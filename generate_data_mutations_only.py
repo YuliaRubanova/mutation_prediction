@@ -25,11 +25,12 @@ DEF_OUTPUT = "/home/yulia/mnt/mutation_prediction_data/region_dataset.mutTumour"
 DEF_VCF_DIR = "/home/ryogali/data/variants/"
 DEF_VCF_FILTER = "/home/ryogali/dev/prob_model/BRCA_files.txt"
 
-def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types):
-	tumour_names = [[tumour_name]] * n_random
-	chrom = [[np.random.choice(list(chromosome_lengths.keys()))] for i in range(n_random)]
-	pos = [[np.random.randint(chromosome_lengths[chrom[i][0]])] for i in range(n_random)]
-	vaf = [[np.random.uniform()] for i in range(n_random)]
+def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types, include_annotation = True):
+	if include_annotation:
+		tumour_names = [[tumour_name]] * n_random
+		chrom = [[np.random.choice(list(chromosome_lengths.keys()))] for i in range(n_random)]
+		pos = [[np.random.randint(chromosome_lengths[chrom[i][0]])] for i in range(n_random)]
+		vaf = [[np.random.uniform()] for i in range(n_random)]
 
 	mut_types = [np.random.multinomial(1, [1/float(n_mut_types)]*n_mut_types) for i in range(n_random)]
 
@@ -39,15 +40,24 @@ def generate_random_mutations(n_random, tumour_name, colnames, n_mut_types):
 	transcribed = np.array([[transcribed] for i in range(n_random)])
 	strand = np.random.choice([0,1])
 	strand = np.array([[strand] for i in range(n_random)])
-
 	strand[np.where(transcribed == 0)] = [-1]
 
-	random_mutations = combine_column([tumour_names, chrom, pos, vaf, mut_types, chromatin, transcribed, strand])
-	
+	random_mutations = combine_column([mut_types, chromatin, transcribed, strand])
+
+	if include_annotation:
+		random_mutations = combine_column([tumour_names, chrom, pos, vaf, random_mutations])
+
 	n_other_features = len(colnames) - random_mutations.shape[1]
-	other_features = np.random.uniform(size=(n_random, n_other_features))
-	random_mutations = combine_column([random_mutations, other_features])
-	
+	# modelling chromatin features as bernoulli distribution
+	# real data has 7 % of non-zero values, so we set a probability to 0.07
+	other_features = np.random.binomial(np.ones((n_random, n_other_features), dtype=np.int64), 
+		0.07*np.ones((n_random, n_other_features)), 
+		size=(n_random, n_other_features))
+
+	# the other way to generate features: just uniform distribution over [0,1]
+	#other_features = np.random.uniform(size=(n_random, n_other_features))
+
+	random_mutations = combine_column([random_mutations, other_features])	
 	return pd.DataFrame(random_mutations, columns = colnames)
 
 def generate_training_set(vcf_list, hg19, trinuc, features_chromatin_mRNA, other_features):
