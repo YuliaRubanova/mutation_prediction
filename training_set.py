@@ -20,6 +20,8 @@ import tensorflow as tf
 
 FLAGS = None
 
+n_mut_types = 96
+
 def load_dataset(dataset_path, n_parts = 1000):
 	paths = []
 	for p in dataset_path:
@@ -122,6 +124,46 @@ def make_training_set(mut_features, region_counts, trinuc, feature_path, region_
 			pickle_name = dataset_tum_name[:-len(".annotation.hdf5")] + ".feature_annotation.pickle"
 			dump_pickle([mut_annotation_cur, feature_names], pickle_name)
 
+		mut_annotation_cur, feature_names = load_pickle(dataset_tum_name[:-len(".annotation.hdf5")] + ".feature_annotation.pickle")
+		
+
+		#dataset, _,_,_,_,mut_annotation_cur, _ = downsample_data([dataset,dataset, dataset, dataset, dataset, mut_annotation_cur, dataset], mut_features[:1000])
+
+		# print(np.reshape(dataset[:1000,96:], [1000, region_size, -1])[:,50,1])
+
+		#tmp = np.reshape(dataset[:1000,96:], [1000, region_size, -1])[:,50]
+		# print(np.apply_along_axis(lambda x: np.mean(x != 0), 0, tmp.astype(float)))
+
+
+		# print(mut_annotation_cur.iloc[:10])
+
+
+		# print(np.apply_along_axis(lambda x: np.mean(x != 0), 0, np.array(mut_features)[:1000, 96+4:].astype(float)))
+		# print(np.apply_along_axis(lambda x: np.mean(x != 0), 0, tmp.astype(float)))
+
+
+		# print(np.mean(np.apply_along_axis(lambda x: np.mean(x != 0), 0, np.array(mut_features)[:1000, 96+4:].astype(float))[3:]))
+		# print(np.mean(np.apply_along_axis(lambda x: np.mean(x != 0), 0, tmp.astype(float))[3:]))
+
+		# print(mut_features.columns.values[96+4:])
+		# print(feature_names[(96):])
+
+
+		# tmp = np.reshape(dataset[:,96:], [dataset.shape[0], region_size, -1])[:,50]
+		# print(np.apply_along_axis(lambda x: np.mean(x != 0), 0, tmp.astype(float)))
+
+
+
+
+		# print(np.transpose(np.reshape(dataset[176][96:], [region_size, -1]))[0])
+		# print(dataset[176][96:])
+		# print(sum([float(x) for x in dataset[176][96:]]))
+		# print(len(dataset[176]))
+		# mut_annotation_cur, feature_names = load_pickle(dataset_tum_name[:-len(".annotation.hdf5")] + ".feature_annotation.pickle")
+		# print(mut_annotation_cur.iloc[176])
+		# print(feature_names)
+		# exit()
+
 	num_features = dataset.shape[1]
 	return n_mut, num_features, max_tumours
 	
@@ -143,7 +185,7 @@ def train_test_split(data_list, split_by, test_size=0.2, random_state=1991):
 		splitted_data.append(data[test_indices])
 	return splitted_data
 
-def read_tumour_data(files, tumour_batch_size = None, start = 0):
+def read_tumour_data(files, tumour_batch_size = None, start = 0, binarize_features=False):
 	if tumour_batch_size is not None:
 		files = files[start*tumour_batch_size:(start+1)*tumour_batch_size] 
 
@@ -156,7 +198,6 @@ def read_tumour_data(files, tumour_batch_size = None, start = 0):
 	mut_vaf = []
 	n_unique_tumours = 0
 	mut_annotation = feature_names = None
-
 
 	for file in files:
 		dictionary = load_from_HDF(file)
@@ -178,6 +219,21 @@ def read_tumour_data(files, tumour_batch_size = None, start = 0):
 	labels = np.concatenate(labels)
 	x_tumour_ids = np.concatenate(x_tumour_ids)
 	mut_vaf = np.concatenate(mut_vaf)
+
+	if binarize_features:
+		features = training_set[n_mut_types:]
+		features[features != 0] = 1
+		training_set[n_mut_types:] = features
+
+	# making the chromatin features to be on log scale, skipping mutation types
+	# transforming only non-zero values!
+	# Chromatin, strand, transcription should not be converted to log!
+	# is not appropriate -- function is not continuous at zero
+	# reshaped_data = np.reshape(training_set[:,96:], [training_set.shape[0], region_size, -1])
+	# chrom_features = reshaped_data[:,:,3:]
+	# chrom_features[np.where(chrom_features > 0)] = -np.log(chrom_features[np.where(chrom_features > 0)])
+	# chrom_features = np.concatenate((reshaped_data[:,:,:3], chrom_features), axis=2)
+	# training_set[:,96:] = np.reshape(chrom_features, [training_set.shape[0], -1])
 
 	if not(mut_annotation.shape[0] == training_set.shape[0] and len(feature_names) == training_set.shape[1]):
 		raise Exception("ERROR: Dataset is incorrect: all parts should contain the same number of samples")
@@ -213,7 +269,7 @@ def downsample_data(tumour_data, target_mut_features):
 
 def make_batches_over_time(dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, sequences_per_batch, n_timesteps):
 	# Using only positive examples
-	
+
 	positive_examples = np.where(region_counts.ravel() > 0)[0]
 	dataset = dataset[positive_examples]
 	tumour_ids = tumour_ids[positive_examples]
@@ -235,7 +291,6 @@ def make_batches_over_time(dataset, region_counts, n_unique_tumours, tumour_ids,
 		tumour_batch_time_estimates = []
 		tumour_names = []
 		batch_size = min(sequences_per_batch, len(unique_tumours) - t_batch_ind * sequences_per_batch)
-		print(batch_size)
 		if batch_size == 0:
 			next
 		for k in range(batch_size):
