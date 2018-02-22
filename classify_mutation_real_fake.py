@@ -402,7 +402,7 @@ if __name__ == '__main__':
 	args = parser.parse_args()
 	test_mode = args.test
 	n_tumours = args.tumours
-	target_n_mut = args.mut
+	n_mut = args.mut
 	n_epochs = int(args.epochs)
 	batch_size = int(args.batch)
 	model_type = args.model

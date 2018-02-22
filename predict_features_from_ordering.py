@@ -74,20 +74,7 @@ def predict_mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_late
 		correct_prediction = correct_predictions_multiclass(predictions, y_)
 	accuracy = tf.reduce_mean(correct_prediction)
 
-
-
-	# dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(y_, axis=1), logits=predictions, validate_args = True)
-	# type_prob = tf.reduce_mean(tf.expand_dims(dist.log_prob(y_), 1))
-
-
-	dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(y_[0], axis=0), logits=log_y_prediction[0], validate_args = True)
-	type_prob = tf.reduce_mean(dist.log_prob(y_[0]))
-
-	accuracy = tf.nn.softmax_cross_entropy_with_logits(labels=y_[0], logits=log_y_prediction[0]) # neural net
-
-
-
-	return log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, type_prob
+	return log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions
 
 def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, model_type, model_save_path, adam_rate = 1e-3):
 	x = tf.placeholder(tf.float32, [None, n_region_features])
@@ -97,7 +84,7 @@ def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, m
 	initial_tumour_latents = tf.abs(tf.concat([weight_variable([z_latent_dim//2,1]), weight_variable([z_latent_dim//2,1], mean=1)], axis = 0))
 	tumour_latents = tf.transpose(tf.tile(initial_tumour_latents, [1,n_unique_tumours]))
 
-	log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, type_prob =  predict_mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
+	log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions =  predict_mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
 
 	with tf.name_scope('adam_optimizer'):
 		train_step = tf.train.AdamOptimizer(adam_rate).minimize(cross_entropy)
@@ -108,16 +95,15 @@ def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, m
 	tf_vars = [x, x_tumour_ids, y_, log_y_prediction]
 	metrics = [cross_entropy, accuracy]
 	meta = [train_step, saver]
-	extra = [z_t, y_region, predictions, type_prob]
+	extra = [z_t, y_region, predictions]
 
 	if model_type == "gaussian":
 		extra.append(L)
 
 	return tf_vars, metrics, meta, extra
 
-def train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data, extra):
+def train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data):
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
-	z_t, y_region, predictions, type_prob = extra
 
 	x_train, y_train, x_tumour_ids_train  = train_data
 	x_test, y_test, x_tumour_ids_test  = test_data
@@ -146,9 +132,6 @@ def train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data,
 					% (j, i, train_cross_entropy, cross_entropy.eval(feed_dict=test_dict), 
 						accuracy.eval(feed_dict=train_dict), accuracy.eval(feed_dict=test_dict) ))
 				
-				print('train type_prob %g' % type_prob.eval(feed_dict=train_dict))
-				print('test type_prob %g' % type_prob.eval(feed_dict=test_dict))
-
 			if j % 5 == 0:
 				model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
 				save_path = saver.save(sess, model_save_path_tmp)
@@ -156,7 +139,6 @@ def train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data,
 
 			print('test cross_entropy %g' % cross_entropy.eval(feed_dict=test_dict))
 			print('test accuracy %g' % accuracy.eval(feed_dict=test_dict))
-			print('test type_prob %g' % type_prob.eval(feed_dict=test_dict))
 	
 		save_path = saver.save(sess, model_save_path)
 		print("Model saved in file: %s" % save_path)
@@ -202,11 +184,19 @@ if __name__ == '__main__':
 
 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
 
-	training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours, binarize_features=True)
+	training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours)
 
-	if (train_garbage):
-		training_set = np.array(generate_random_mutations(training_set.shape[0], "random", feature_names, 96, include_annotation = False))
-	
+
+
+
+
+
+
+
+
+
+
+
 	training_set, labels = make_set_for_predicting_mut_rate(training_set, labels, mut_annotation, feature_names)
 	n_region_features = training_set.shape[1]
 	n_mut_types = labels.shape[1]
@@ -221,7 +211,7 @@ if __name__ == '__main__':
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
 	cross_entropy, accuracy = metrics
 	train_step, saver = meta
-	z_t, y_region, predictions, type_prob = extra
+	z_t, y_region, predictions = extra
 	
 	# Split dataset into train / test
 	x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, tumour_ids], split_by = mut_vaf, test_size=0.2)
@@ -231,7 +221,7 @@ if __name__ == '__main__':
 	test_data = [x_test, y_test, x_tumour_ids_test]
 
 	if not test_mode:
-		train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data, extra)
+		train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data)
 	else:
 		if not os.path.exists(model_save_path):
 			print("Model folder not found: " + model_save_path)

@@ -39,34 +39,10 @@ DEF_FEATURE_PATH = DIR + "/dna_features_ryoga/"
 mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
 feature_path = DIR + "/dna_features_ryoga/"
 file_name = os.path.basename(__file__)[:-3]
-model_dir = "trained_models/model." + file_name + ".tumours{}.mut{}/"
+model_dir = "trained_models/model." + file_name + ".tumours{}.mut{}.timesteps{}/"
 # dataset_with_annotation = DIR + "mutation_prediction_data/region_dataset.small.over_time.annotation.hdf5"
 # datasets with at most 10000 mutations per tumour
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
-
-def evaluate_on_each_tumour(x_data, tumours_data, time_estimates_data, metric):
-	evaluated_metric = 0
-	n_tumour_batches = x_data.shape[0]
-
-	for tumour_data, tid, time in zip(x_data, tumours_data, time_estimates_data):
-		tumour_dict = {x: tumour_data, tumour_id: np.array(tid).astype(int)[:,np.newaxis], 
-						time_estimates: time, 
-						time_series_lengths: np.squeeze(np.apply_along_axis(sum, 1, time_estimates_data > 0), axis=0),
-						sequences_per_batch_tf: tumour_data.shape[1]}
-		evaluated_metric += metric.eval(feed_dict=tumour_dict) / n_tumour_batches
-	return evaluated_metric
-
-def collect_on_each_tumour(x_data, tumours_data, time_estimates_data, metric):
-	evaluated_metric = []
-	n_tumour_batches = x_data.shape[0]
-
-	for tumour_data, tid, time in zip(x_data, tumours_data, time_estimates_data):
-		tumour_dict = {x: tumour_data, tumour_id: np.array(tid).astype(int)[:,np.newaxis], 
-						time_estimates: time, 
-						time_series_lengths: np.squeeze(np.apply_along_axis(sum, 1, time_estimates_data > 0), axis=0),
-						sequences_per_batch_tf: tumour_data.shape[1]}
-		evaluated_metric.append(metric.eval(feed_dict=tumour_dict))
-	return evaluated_metric
 
 def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour_id, tumour_latents, lstm_size, reg_latent_dim, time_steps, batch_size_per_tp, sequences_per_batch_tf):
 	#with tf.device('/gpu:0'):
@@ -92,20 +68,44 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 		# !!!! no z_t
 		#input = tf.concat([ tf.reshape(batch, [-1]), z_t], 0)
 
-		batch = tf.reshape(batch, [-1,num_features])
-		next_batch = tf.reshape(next_batch, [-1,num_features])
+		# to compute likelihood for the batch of 120 mutations
+		# uncomment mut_types = (np.sum(mut_types, axis =0)/sum(np.sum(mut_types, axis =0)))[np.newaxis,:] in training_set.py
+		# set x = tf.placeholder(tf.float32, [time_steps, None, 1, 96])
+		# batch = tf.reshape(batch, [-1,num_features])
+		# next_batch = tf.reshape(next_batch, [-1,num_features])
 
-		#hidden_state = neural_net(latents, encoder_latents['weights'], encoder_latents['biases'])
-		next_state = neural_net(tf.concat([tf.squeeze(prev_hidden_state), batch, vaf], 1), next_state_nn['weights'], next_state_nn['biases'])
+		# #hidden_state = neural_net(latents, encoder_latents['weights'], encoder_latents['biases'])
+		# next_state = neural_net(tf.concat([tf.squeeze(prev_hidden_state), batch, vaf], 1), next_state_nn['weights'], next_state_nn['biases'])
+		# prev_hidden_state = next_state
+
+		# predicted_mut_types = neural_net(next_state, predictor['weights'], predictor['biases'])
+		# prediction_means.append(predicted_mut_types)
+
+		# # in multinomial_only data is normalized by the number of mutations in the batch
+		# next_batch_counts = next_batch * tf.cast(batch_size_per_tp, dtype=tf.float32)
+		# dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(next_batch_counts, axis=1), logits=predicted_mut_types, validate_args = True)
+		# type_prob = dist.log_prob(next_batch_counts) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths - 1)
+		# type_prob_sum = tf.add(type_prob_sum, type_prob)
+
+
+
+
+
+		# to compute likelihood for each mutation separately
+		# comment out mut_types = (np.sum(mut_types, axis =0)/sum(np.sum(mut_types, axis =0)))[np.newaxis,:] in training_set.py
+		# set x = tf.placeholder(tf.float32, [time_steps, None, batch_size_per_tp, 96])
+		frequencies = tf.reduce_sum(batch, axis =1)
+		frequencies = frequencies / tf.expand_dims(tf.reduce_sum(frequencies, axis =1), axis =1)
+		frequencies = tf.reshape(frequencies, [-1,num_features])
+
+		next_state = neural_net(tf.concat([tf.squeeze(prev_hidden_state), frequencies, vaf], 1), next_state_nn['weights'], next_state_nn['biases'])
 		prev_hidden_state = next_state
 
 		predicted_mut_types = neural_net(next_state, predictor['weights'], predictor['biases'])
-		prediction_means.append(predicted_mut_types)
-
-		next_batch_counts = next_batch * tf.cast(batch_size_per_tp, dtype=tf.float32)
-		dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(next_batch_counts, axis=1), logits=predicted_mut_types, validate_args = True)
-		type_prob = dist.log_prob(next_batch_counts) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths - 1)
+		prediction_means.append(predicted_mut_types)	
+		type_prob = compute_mut_type_prob(next_batch, n_mut_types, predicted_mut_types, vaf=vaf, time_series_lengths=time_series_lengths)
 		type_prob_sum = tf.add(type_prob_sum, type_prob)
+
 
 		mse_batch = mean_squared_error(next_batch, predicted_mut_types) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths -1)
 
@@ -134,7 +134,7 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 	return tf.reduce_mean(loss), tf.reduce_mean(type_prob_sum), predictions
 
 def make_model(n_unique_tumours, z_latent_dim, time_steps, batch_size_per_tp, lstm_size, model_save_path, adam_rate = 1e-3):
-	x = tf.placeholder(tf.float32, [time_steps, None, 1, 96])
+	x = tf.placeholder(tf.float32, [time_steps, None, batch_size_per_tp, 96])
 	tumour_id = tf.placeholder(tf.int32, [None, 1])
 	time_estimates = tf.placeholder(tf.float32, [time_steps,None,1])
 	time_series_lengths = tf.placeholder(tf.float32, [None,1])
@@ -184,8 +184,8 @@ def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files
 		sess.run(tf.global_variables_initializer())
 
 		print('Initial')
-		print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, cost))
-		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost)
+		print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, cost))
+		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, cost)
 		print('test cost %g' % cost_test)
 
 		for j in range(n_epochs):
@@ -210,16 +210,16 @@ def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files
 							train_step.run(feed_dict=tumour_dict)
 
 					print('Epoch %d.%d:' % (j, k))
-					print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, cost))
-					cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost)
+					print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, cost))
+					cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test,  tf_vars, cost)
 					print('test cost %g' % cost_test)
 				
-					#if j % 5 == 0:
-				# 		model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
-				# 		save_path = saver.save(sess, model_save_path_tmp)
-				# 		print("Model saved in file: %s" % save_path)
+					if j % 5 == 0:
+						model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
+						save_path = saver.save(sess, model_save_path_tmp)
+						print("Model saved in file: %s" % save_path)
 
-		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost)
+		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test,  tf_vars, cost)
 		print('test cost %g' % cost_test)
 	
 		save_path = saver.save(sess, model_save_path)
@@ -239,6 +239,7 @@ if __name__ == '__main__':
 	parser.add_argument('-f', '--feature-path', help='feature file path', default=DEF_FEATURE_PATH)
 	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=100,type=int)
 	parser.add_argument('-a', '--adam', help='Rate for adam optimizer', default=1e-3,type=float)
+	parser.add_argument('-t', '--time-steps', help='number of time steps for RNN. Other time steps are ignored', default=10,type=int)
 
 	args = parser.parse_args()
 	test_mode = args.test
@@ -250,6 +251,7 @@ if __name__ == '__main__':
 	feature_path = args.feature_path
 	region_size = args.region_size
 	adam_rate = args.adam
+	n_timesteps = args.time_steps
 	#latent_dimension = args.latents
 
 	print("Fitting model version: " + model_type)
@@ -264,13 +266,11 @@ if __name__ == '__main__':
 	lstm_size = 150
 	z_latent_dim = reg_latent_dim * 2
 
-	n_timesteps = 10
-
 	mut_features, unique_tumours, n_tumours, n_mut, available_tumours, num_features, n_unique_tumours = \
 		load_filter_dataset(mut_dataset_path, feature_path, dataset_with_annotation, region_size, n_tumours, n_mut)
 
 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
-	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut])
+	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut, n_timesteps])
 
 	tf_vars, metrics, meta, extra = make_model(n_unique_tumours, z_latent_dim, n_timesteps, batch_size_per_tp, lstm_size, model_save_path, adam_rate = adam_rate)
 
@@ -297,39 +297,45 @@ if __name__ == '__main__':
 			test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, annot, features = read_tumour_data(tumour_files_test)
 			x_test, tumours_test, time_estimates_test = make_batches_over_time_type_multinomials(test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, batch_size_per_tp, n_unique_tumours_test, n_timesteps)
 
-			#print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, cost))
-			print('test cost %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, cost))
+			#print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train,  tf_vars, cost))
+			print('test cost %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test,  tf_vars, cost))
 
 			# Plots
 			# Test
-			collected_predictions = collect_on_each_tumour(x_test, tumours_test, time_estimates_test, predictions)
+			collected_predictions = collect_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, predictions)
 			collected_predictions = np.array(np.squeeze(collected_predictions))
 			predicted_types = collected_predictions[:,:,:n_mut_types]
 			# show the logits
 			predicted_types = softmax(predicted_types, axis=2)
 
-			ground_truth_types = np.squeeze(x_test)[1:]
+			ground_truth = np.squeeze(x_test)
+			ground_truth_types = np.sum(ground_truth[:,:,:,:n_mut_types], axis=2)
+			ground_truth_types /= batch_size_per_tp
+			# to remove the first time point -- it is not predicted
+			ground_truth_types = ground_truth_types[1:]
+
 
 			plot_types_over_time(ground_truth_types, plot_name=model_dir + "ground_types_test.pdf", ylabel = "Mutation types")
 			plot_types_over_time(predicted_types, plot_name=model_dir +"predicted_types_test.pdf", ylabel = "Mutation types")
 
 			# Train
-			collected_predictions = collect_on_each_tumour(x_train, tumours_train, time_estimates_train, predictions)
+			collected_predictions = collect_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, predictions)
 			collected_predictions = np.array(np.squeeze(collected_predictions))
 			predicted_types = collected_predictions[:,:,:n_mut_types]
 			predicted_types = softmax(predicted_types, axis=2)
 
-			ground_truth_types = np.squeeze(x_train)[1:]
+			ground_truth = np.squeeze(x_train)
+			ground_truth_types = np.sum(ground_truth[:,:,:,:n_mut_types], axis=2)
+			ground_truth_types /= batch_size_per_tp
+			# to remove the first time point -- it is not predicted
+			ground_truth_types = ground_truth_types[1:]
 		
 			plot_types_over_time(ground_truth_types, plot_name=model_dir +"ground_types_train.pdf", ylabel = "Mutation types")
 			plot_types_over_time(predicted_types, plot_name=model_dir + "predicted_types_train.pdf", ylabel = "Mutation types")
 
 
-
-
-
 			# Stats
-			collected_predictions = collect_on_each_tumour(x_test, tumours_test, time_estimates_test, predictions)
+			collected_predictions = collect_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, predictions)
 			print(len(collected_predictions))
 			print(np.array(collected_predictions).shape)
 			print(collected_predictions[0][0][0][0][:96])

@@ -406,7 +406,8 @@ def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tu
 			for i in range(min(n_timesteps,time_steps_in_tumour)):
 				time_estimates.append(np.mean(mut_vaf_cur[i * batch_size_per_tp : (i+1) * batch_size_per_tp]))
 				mut_types = data_cur[i * batch_size_per_tp : (i+1) * batch_size_per_tp,:96]
-				mut_types = (np.sum(mut_types, axis =0)/sum(np.sum(mut_types, axis =0)))[np.newaxis,:]
+				# !!!!! mutation types are no longer frequencies but just counts
+				#mut_types = (np.sum(mut_types, axis =0)/sum(np.sum(mut_types, axis =0)))[np.newaxis,:]
 				tumour_data.append(mut_types)
 
 			if n_timesteps > time_steps_in_tumour:

@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tempfile
+import numpy as np
 
 def deepnn(x):
   """deepnn builds the graph for a deep net for classifying digits.
@@ -132,4 +133,41 @@ def correct_predictions_multiclass(predictions, y_):
 
 def mean_squared_error(truth, predicted):
   return tf.reduce_mean(tf.square(truth - predicted))
-    
+
+def evaluate_on_each_tumour(x_data, tumours_data, time_estimates_data, tf_vars, metric):
+  x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
+  evaluated_metric = 0
+  n_tumour_batches = x_data.shape[0]
+
+  for tumour_data, tid, time in zip(x_data, tumours_data, time_estimates_data):
+    tumour_dict = {x: tumour_data, tumour_id: np.array(tid).astype(int)[:,np.newaxis], 
+            time_estimates: time, 
+            time_series_lengths: np.squeeze(np.apply_along_axis(sum, 1, time_estimates_data > 0), axis=0),
+            sequences_per_batch_tf: tumour_data.shape[1]}
+    evaluated_metric += metric.eval(feed_dict=tumour_dict) / n_tumour_batches
+  return evaluated_metric
+
+def collect_on_each_tumour(x_data, tumours_data, time_estimates_data, tf_vars, metric):
+  x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
+  evaluated_metric = []
+  n_tumour_batches = x_data.shape[0]
+
+  for tumour_data, tid, time in zip(x_data, tumours_data, time_estimates_data):
+    tumour_dict = {x: tumour_data, tumour_id: np.array(tid).astype(int)[:,np.newaxis], 
+            time_estimates: time, 
+            time_series_lengths: np.squeeze(np.apply_along_axis(sum, 1, time_estimates_data > 0), axis=0),
+            sequences_per_batch_tf: tumour_data.shape[1]}
+    evaluated_metric.append(metric.eval(feed_dict=tumour_dict))
+  return evaluated_metric
+
+def compute_mut_type_prob(truth, n_mut_types, predicted_mut_types, vaf=None, time_series_lengths=None):
+    mut_types = tf.transpose(truth[:,:,:n_mut_types], perm = [1,0,2])
+    dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(mut_types,axis=2), logits=predicted_mut_types, validate_args = True)
+
+    type_prob = tf.expand_dims(dist.log_prob(mut_types), 1)
+
+    if vaf is not None:
+      type_prob = tf.multiply(type_prob, tf.to_float(tf.greater((vaf),tf.constant(0.0))))
+      type_prob = tf.divide(type_prob, (time_series_lengths - 1))
+    return type_prob
+  
