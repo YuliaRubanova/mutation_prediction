@@ -53,10 +53,6 @@ def predict_mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_late
 	z_latent_dim = reg_latent_dim*2
 	n_types = y_.get_shape()[1].value
 
-	with tf.name_scope('region_latents'):
-		prob_nn = init_neural_net_params([x_dim, 500, 500, 700, reg_latent_dim])
-		y_region = neural_net(X, prob_nn['weights'], prob_nn['biases'])
-
 	z_t = tf.squeeze(tf.gather_nd(tumour_latents, x_tumour_ids))
 
 	#prob_nn = init_neural_net_params([x_dim + z_latent_dim] + [200, 200, n_types])
@@ -74,20 +70,19 @@ def predict_mutation_rate_model_nn(X, y_, x_tumour_ids, tumour_latents, reg_late
 		correct_prediction = correct_predictions_multiclass(predictions, y_)
 	accuracy = tf.reduce_mean(correct_prediction)
 
+	dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(y_, axis=1), logits=log_y_prediction, validate_args = True)
+	type_prob = tf.reduce_mean(tf.expand_dims(dist.log_prob(y_), 1))
+
+	# results for just one mutation -- sanity check
+	# dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(y_[0], axis=0), logits=log_y_prediction[0], validate_args = True)
+	# type_prob = tf.reduce_mean(dist.log_prob(y_[0]))
+
+	# cross entropy for comparison -- should give the same result
+	# tf.nn.softmax_cross_entropy_with_logits(labels=y_[0], logits=log_y_prediction[0]) # neural net
 
 
-	# dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(y_, axis=1), logits=predictions, validate_args = True)
-	# type_prob = tf.reduce_mean(tf.expand_dims(dist.log_prob(y_), 1))
 
-
-	dist = tf.contrib.distributions.Multinomial(total_count=tf.reduce_sum(y_[0], axis=0), logits=log_y_prediction[0], validate_args = True)
-	type_prob = tf.reduce_mean(dist.log_prob(y_[0]))
-
-	accuracy = tf.nn.softmax_cross_entropy_with_logits(labels=y_[0], logits=log_y_prediction[0]) # neural net
-
-
-
-	return log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, type_prob
+	return log_y_prediction, z_t, cross_entropy, accuracy, predictions, type_prob
 
 def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, model_type, model_save_path, adam_rate = 1e-3):
 	x = tf.placeholder(tf.float32, [None, n_region_features])
@@ -97,7 +92,7 @@ def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, m
 	initial_tumour_latents = tf.abs(tf.concat([weight_variable([z_latent_dim//2,1]), weight_variable([z_latent_dim//2,1], mean=1)], axis = 0))
 	tumour_latents = tf.transpose(tf.tile(initial_tumour_latents, [1,n_unique_tumours]))
 
-	log_y_prediction, z_t, y_region, cross_entropy, accuracy, predictions, type_prob =  predict_mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
+	log_y_prediction, z_t, cross_entropy, accuracy, predictions, type_prob =  predict_mutation_rate_model_nn(x, y_, x_tumour_ids, tumour_latents, reg_latent_dim)
 
 	with tf.name_scope('adam_optimizer'):
 		train_step = tf.train.AdamOptimizer(adam_rate).minimize(cross_entropy)
@@ -108,7 +103,7 @@ def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, m
 	tf_vars = [x, x_tumour_ids, y_, log_y_prediction]
 	metrics = [cross_entropy, accuracy]
 	meta = [train_step, saver]
-	extra = [z_t, y_region, predictions, type_prob]
+	extra = [z_t, predictions, type_prob]
 
 	if model_type == "gaussian":
 		extra.append(L)
@@ -117,7 +112,7 @@ def make_model(n_region_features, n_mut_types, n_unique_tumours, z_latent_dim, m
 
 def train(tf_vars, n_epochs, batch_size, model_save_path, train_data, test_data, extra):
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
-	z_t, y_region, predictions, type_prob = extra
+	z_t, predictions, type_prob = extra
 
 	x_train, y_train, x_tumour_ids_train  = train_data
 	x_test, y_test, x_tumour_ids_test  = test_data
@@ -221,7 +216,7 @@ if __name__ == '__main__':
 	x, x_tumour_ids, y_, log_y_prediction = tf_vars
 	cross_entropy, accuracy = metrics
 	train_step, saver = meta
-	z_t, y_region, predictions, type_prob = extra
+	z_t, predictions, type_prob = extra
 	
 	# Split dataset into train / test
 	x_train, x_test, y_train, y_test, x_tumour_ids_train, x_tumour_ids_test = train_test_split([training_set, labels, tumour_ids], split_by = mut_vaf, test_size=0.2)
