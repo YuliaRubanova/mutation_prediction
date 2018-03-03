@@ -3,6 +3,10 @@ import pickle
 import numpy as np
 import pandas as pd
 import h5py
+import os
+import csv
+import tensorflow as tf
+from shutil import copyfile
 
 def load_pickle(filename):
 	with open(filename, 'rb') as pkl_file:
@@ -29,6 +33,14 @@ def load_from_HDF(fname):
 				data[key] = np.asarray(f[group][key])
 				#print(key + ":", f[key])
 	return data
+
+def read_csv(filename):
+	res = []
+	with open(filename, 'r') as f:
+		reader = csv.reader(f, delimiter=',')
+		for i,row in enumerate(reader):
+			res.append(row)
+	return(res)
 
 def write_output_to_file(filename, data):
 	# write content in data by line to filename
@@ -205,3 +217,53 @@ def filter_tumours(training_set, labels, unique_tumours, x_tumour_ids, tumor_ids
 	x_tumour_ids = x_tumour_ids[samples_to_use]
 
 	return training_set, labels, unique_tumours, x_tumour_ids
+
+
+def load_annotation(feature_path):
+	try:
+		mRNA = sort_dict(load_pickle(os.path.join(feature_path, "mRNA.pickle")))
+		trinuc = load_pickle(os.path.join(feature_path,"trinucleotide.pickle"))
+		#alex_signature_file = load_npy(os.path.join(feature_path,"signature.npy"))
+		hg19 = load_pickle(os.path.join(feature_path,"hg.pickle"))
+		chromatin = sort_dict(load_pickle(os.path.join(feature_path, "chromatin.pickle")))
+
+		other_features = {}
+		for file in os.listdir(feature_path):
+			if file in ["mRNA.pickle", "trinucleotide.pickle", "hg.pickle", "chromatin.pickle", "signature.npy"]:
+				continue
+			if not file.endswith(".pickle"):
+				continue
+
+			new_feature = sort_dict(load_pickle(os.path.join(feature_path, file)))
+			other_features[file[:-len(".pickle")]] = new_feature
+	except Exception as error:
+		raise Exception("Please provide valid compiled feature data files.")
+
+	features_chromatin_mRNA= {'chromatin':chromatin, 'mRNA': mRNA}
+
+	return features_chromatin_mRNA, other_features, hg19, trinuc
+
+def sort_dict(dictionary):
+	for key in dictionary.keys():
+		dictionary[key] = sorted(dictionary[key])
+	return dictionary
+
+def sigmoid(x):
+  return 1 / (1 + np.exp(-x))
+
+def softmax(x, axis=None):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - (np.max(x, axis=axis)[:,:,np.newaxis]))
+    return e_x / e_x.sum(axis=axis)[:,:,np.newaxis]
+
+def prepare_model_dir(call_args, model_dir, file_name, args):
+	tf.reset_default_graph()
+	model_dir = model_dir.format(*args)
+	model_save_path = model_dir + "model.ckpt"
+	os.makedirs(model_dir, exist_ok=True)
+	# copy current script to folder
+	copyfile(file_name, model_dir + os.path.basename(file_name))
+	# write the call to the folder
+	with open(model_dir + "call.txt", "w") as text_file:
+		text_file.write(" ".join(call_args))
+	return model_dir, model_save_path
