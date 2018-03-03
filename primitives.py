@@ -132,7 +132,7 @@ def correct_predictions_multiclass(predictions, y_):
 	return correct_prediction
 
 def mean_squared_error(truth, predicted):
-  return tf.reduce_mean(tf.square(truth - predicted))
+  return tf.sqrt(tf.reduce_mean(tf.square(truth - predicted)))
 
 def evaluate_on_each_tumour(x_data, tumours_data, time_estimates_data, tf_vars, metric):
   x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
@@ -170,4 +170,8 @@ def compute_mut_type_prob(truth, n_mut_types, predicted_mut_types, vaf=None, tim
       type_prob = tf.multiply(type_prob, tf.to_float(tf.greater((vaf),tf.constant(0.0))))
       type_prob = tf.divide(type_prob, (time_series_lengths - 1))
     return type_prob
+
+def kl_divergence(p,q):
+  kl = p * tf.log( p / q)
+  return kl
   

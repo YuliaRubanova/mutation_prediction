@@ -257,7 +257,6 @@ def softmax(x, axis=None):
     return e_x / e_x.sum(axis=axis)[:,:,np.newaxis]
 
 def prepare_model_dir(call_args, model_dir, file_name, args):
-	tf.reset_default_graph()
 	model_dir = model_dir.format(*args)
 	model_save_path = model_dir + "model.ckpt"
 	os.makedirs(model_dir, exist_ok=True)

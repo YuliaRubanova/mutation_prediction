@@ -22,6 +22,7 @@ from training_set import *
 from plot_signatures import *
 from scipy.stats.stats import pearsonr
 import sklearn
+from shutil import copyfile
 
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -422,6 +423,7 @@ if __name__ == '__main__':
 
 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
 
+	tf.reset_default_graph()
 	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut])
 
 	tf_vars, metrics, meta, extra = make_model(num_features, n_unique_tumours, z_latent_dim, model_type, model_save_path, adam_rate = adam_rate)
@@ -438,11 +440,12 @@ if __name__ == '__main__':
 	if not test_mode:
 		train(tf_vars, n_epochs, batch_size, model_save_path, available_tumours)
 	else:
-		if not os.path.exists(model_save_path):
-			print("Model folder not found: " + model_save_path)
+		if not os.path.exists(model_dir):
+			print("Model folder not found: " + model_dir)
 			exit()
 
 		with tf.Session() as sess:
+			copyfile(model_save_path + ".data-00000-of-00001", model_save_path)
 			saver.restore(sess, model_save_path)
 
 			training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, mut_annotation, feature_names = read_tumour_data(available_tumours, region_size)

@@ -18,6 +18,7 @@ import glob
 from training_set import *
 from plot_signatures import *
 import sys
+from shutil import copyfile
 
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -39,7 +40,7 @@ DEF_FEATURE_PATH = DIR + "/dna_features_ryoga/"
 mut_dataset_path = [DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.mutations_only.part*.pickle"]
 feature_path = DIR + "/dna_features_ryoga/"
 file_name = os.path.basename(__file__)[:-3]
-model_dir = "trained_models/model." + file_name + ".tumours{}.mut{}.timesteps{}/"
+model_dir = "trained_models/model." + file_name + ".tumours{}.mut{}.timesteps{}.loss_{}/"
 # dataset_with_annotation = DIR + "mutation_prediction_data/region_dataset.small.over_time.annotation.hdf5"
 # datasets with at most 10000 mutations per tumour
 dataset_with_annotation = DIR + "/mutation_prediction_data/region_dataset.mutTumour10000.region_size{region_size}.ID{{id}}.over_time.annotation.hdf5"
@@ -63,8 +64,9 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 
 	next_state_nn = init_neural_net_params(next_state_nn_dim, stddev = init_scale, bias = init_scale)
 	predictor = init_neural_net_params(predictor_nn_dim, stddev = init_scale, bias = init_scale)
-	loss = tf.Variable(tf.constant(0.0, shape=[1]), trainable=False)
+	mse_loss = tf.Variable(tf.constant(0.0, shape=[1]), trainable=False)
 	type_prob_sum = tf.Variable(tf.constant(0.0, shape=[1]), trainable=False)
+	kl_loss = tf.Variable(tf.constant(0.0, shape=[1]), trainable=False)
 
 	prediction_means = []
 
@@ -107,10 +109,12 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 		type_prob = compute_mut_type_prob(next_batch, n_mut_types, predicted_mut_types, vaf=vaf, time_series_lengths=time_series_lengths)
 		type_prob_sum = tf.add(type_prob_sum, type_prob)
 
+		mse_batch = mean_squared_error(frequencies, tf.nn.softmax(predicted_mut_types, axis = 1)) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths -1)
+		mse_loss = tf.add(mse_loss, mse_batch)
 
-		mse_batch = mean_squared_error(next_batch, predicted_mut_types) * tf.to_float(tf.greater(tf.squeeze(vaf),tf.constant(0.0))) / (time_series_lengths -1)
+		kl_loss = tf.add(kl_loss, kl_divergence(frequencies + tf.constant(0.001), tf.nn.softmax(predicted_mut_types, axis = 1)))
 
-		loss = tf.add(loss, mse_batch)
+
 	
 	# hidden_state = tf.zeros([batch_size_per_tp, lstm.state_size])
 	# current_state = tf.zeros([batch_size_per_tp, lstm.state_size])
@@ -132,11 +136,11 @@ def mutation_rate_model_over_time(X, time_estimates, time_series_lengths, tumour
 
 	predictions = tf.concat(tf.expand_dims(prediction_means, 0), 0)
 
-	return tf.reduce_mean(loss), tf.reduce_mean(type_prob_sum), predictions
+	return tf.reduce_mean(mse_loss), tf.reduce_mean(type_prob_sum), predictions, tf.reduce_mean(kl_loss)
 
 def make_model(n_unique_tumours, z_latent_dim, time_steps, batch_size_per_tp, lstm_size, model_save_path, \
-					next_state_nn_dim, predictor_nn_dim, adam_rate = 1e-3, init_scale = 0.01):
-	x = tf.placeholder(tf.float32, [time_steps, None, batch_size_per_tp, 96])
+					next_state_nn_dim, predictor_nn_dim, n_mut_types, loss_type="ce", adam_rate = 1e-3, init_scale = 0.01):
+	x = tf.placeholder(tf.float32, [time_steps, None, batch_size_per_tp, n_mut_types])
 	tumour_id = tf.placeholder(tf.int32, [None, 1])
 	time_estimates = tf.placeholder(tf.float32, [time_steps,None,1])
 	time_series_lengths = tf.placeholder(tf.float32, [None,1])
@@ -145,11 +149,20 @@ def make_model(n_unique_tumours, z_latent_dim, time_steps, batch_size_per_tp, ls
 	initial_tumour_latents = tf.abs(tf.concat([weight_variable([z_latent_dim//2,1]), weight_variable([z_latent_dim//2,1], mean=1)], axis = 0))
 	tumour_latents = tf.transpose(tf.tile(initial_tumour_latents, [1,n_unique_tumours]))
 
-	mse, likelihood, predictions = \
+	mse, likelihood, predictions, kl_loss = \
 		mutation_rate_model_over_time(x, time_estimates, time_series_lengths, tumour_id, tumour_latents, lstm_size, reg_latent_dim, time_steps, \
 					batch_size_per_tp, sequences_per_batch_tf, next_state_nn_dim, predictor_nn_dim, init_scale = init_scale)
 	
-	cost = -likelihood
+	if loss_type == "ce":
+		cost = -likelihood
+	elif loss_type == "mse":
+		cost = mse
+	elif loss_type == "kl":
+		cost = kl_loss
+	else:
+		print("ERROR: unknown loss")
+		quit()
+
 
 	with tf.name_scope('adam_optimizer'):
 		train_step = tf.train.AdamOptimizer(adam_rate).minimize(cost)
@@ -159,7 +172,7 @@ def make_model(n_unique_tumours, z_latent_dim, time_steps, batch_size_per_tp, ls
 	saver = tf.train.Saver()
 
 	tf_vars = [x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions]
-	metrics = [mse, likelihood, cost]
+	metrics = [mse, likelihood, cost, kl_loss]
 	meta = [train_step, saver]
 	extra = []
 
@@ -167,28 +180,40 @@ def make_model(n_unique_tumours, z_latent_dim, time_steps, batch_size_per_tp, ls
 
 def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps):
 	x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
-	mse, likelihood, cost = metrics
+	mse, likelihood, cost, kl_loss = metrics
 	train_step, saver = meta
 	#next_batch_counts = extra[0]
 
 	test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, annot, features = read_tumour_data(tumour_files_test)
-	x_test, tumours_test, time_estimates_test = make_batches_over_time_type_multinomials(test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, batch_size_per_tp, n_unique_tumours_test, n_timesteps)
+	x_test, tumours_test, time_estimates_test = make_batches_over_time_type_multinomials(test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, batch_size_per_tp, n_unique_tumours_test, n_timesteps, compress_types=compress_types)
 
 	test_data = [x_test, tumours_test, time_estimates_test]
 	time_steps = x_test.shape[1]
 
 	training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, annot, features = read_tumour_data(tumour_files_train)
-	x_train, tumours_train, time_estimates_train = make_batches_over_time_type_multinomials(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, n_unique_tumours, n_timesteps)
+	x_train, tumours_train, time_estimates_train = make_batches_over_time_type_multinomials(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, n_unique_tumours, n_timesteps, compress_types=compress_types)
 	sequences_per_batch = x_train.shape[2]
 
 	print("Optimizing...")
 	with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
 		sess.run(tf.global_variables_initializer())
 
-		print('Initial')
-		print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, cost))
-		cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, cost)
-		print('test cost %g' % cost_test)
+		print(("Epoch " + "| {:5} "*8).format("Train loss", "Test loss", "Train LL", "Test LL", "Train MSE", "Test MSE", "Train KL", "Test KL"))
+
+		train_cost = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, cost)
+		test_cost = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, cost)
+
+		train_likelihood = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, likelihood)
+		test_likelihood = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, likelihood)
+
+		train_mse = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, mse)
+		test_mse = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, mse)
+
+		train_kl = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, kl_loss)
+		test_kl = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, kl_loss)
+
+		print(("Init  "+ "| {:5.4f} "*8).format(train_cost, test_cost, \
+						train_likelihood, test_likelihood, train_mse, test_mse, train_kl, test_kl))
 
 		for j in range(n_epochs):
 				for k in range(len(tumour_files_train) // n_tumours_per_batch+1):
@@ -199,6 +224,9 @@ def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files
 						x_train, tumours_train, time_estimates_train = make_batches_over_time_type_multinomials(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, sequences_per_batch, n_timesteps)
 						sequences_per_batch = x_train.shape[2]
 
+					print(time_estimates_train.shape)
+					print(np.apply_along_axis(sum, 1, time_estimates_train > 0).shape)
+					
 					train_data = [x_train, tumours_train, time_estimates_train]
 					train_dict_batch = {x: x_train, tumour_id: tumours_train, time_estimates: time_estimates_train,
 										time_series_lengths: np.squeeze(np.apply_along_axis(sum, 1, time_estimates_train > 0), axis=0),
@@ -211,11 +239,21 @@ def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files
 											sequences_per_batch_tf: tumour_data.shape[1]}
 							train_step.run(feed_dict=tumour_dict)
 
-					print('Epoch %d.%d:' % (j, k))
-					print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, cost))
-					cost_test = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test,  tf_vars, cost)
-					print('test cost %g' % cost_test)
-				
+					train_cost = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, cost)
+					test_cost = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, cost)
+
+					train_likelihood = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, likelihood)
+					test_likelihood = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, likelihood)
+
+					train_mse = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, mse)
+					test_mse = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, mse)
+
+					train_kl = evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train, tf_vars, kl_loss)
+					test_kl = evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test, tf_vars, kl_loss)
+
+					print(("{}.{}   "+ "| {:5.4f} "*8).format(j, k, train_cost, test_cost, \
+						train_likelihood, test_likelihood, train_mse, test_mse, train_kl, test_kl))
+
 					if j % 5 == 0:
 						model_save_path_tmp = "trained_models/tmp/model.region_dataset.model{}.tumours{}.mut{}.ckpt".format(model_type, n_tumours, n_mut)
 						save_path = saver.save(sess, model_save_path_tmp)
@@ -229,46 +267,46 @@ def train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files
 		return cost_test
 
 # # for spearmint
-def main(job_id, params):
-	print(params)
+# def main(job_id, params):
+# 	print(params)
 
-	# n_tumours = params["n_tumours"]
-	# n_mut = params["n_mut"]
-	# n_epochs = params["n_epochs"]
-	# batch_size = params["batch_size"]
-	# adam_rate = params["adam_rate"]
-	# n_timesteps = params["n_timesteps"]
-	# batch_size_per_tp=params["batch_size_per_tp"]
-	# sequences_per_batch = params["sequences_per_batch"]
-	# lstm_size = params["lstm_size"]
-	# next_state_nn_dim = params["next_state_nn_dim"]
-	# predictor_nn_dim = params["predictor_nn_dim"]
+# 	# n_tumours = params["n_tumours"]
+# 	# n_mut = params["n_mut"]
+# 	# n_epochs = params["n_epochs"]
+# 	# batch_size = params["batch_size"]
+# 	# adam_rate = params["adam_rate"]
+# 	# n_timesteps = params["n_timesteps"]
+# 	# batch_size_per_tp=params["batch_size_per_tp"]
+# 	# sequences_per_batch = params["sequences_per_batch"]
+# 	# lstm_size = params["lstm_size"]
+# 	# next_state_nn_dim = params["next_state_nn_dim"]
+# 	# predictor_nn_dim = params["predictor_nn_dim"]
 
-	n_tumours = 10
-	n_mut = None
-	n_epochs = 100
-	batch_size = 500
-	adam_rate = 1e-3
-	n_timesteps = 10
-	batch_size_per_tp=120
-	sequences_per_batch = 8
-	lstm_size = 150
-	next_state_nn_dim = params["next_state_nn_dim"]
-	predictor_nn_dim = params["predictor_nn_dim"]
-	init_scale = 0.01
+# 	n_tumours = 10
+# 	n_mut = None
+# 	n_epochs = 100
+# 	batch_size = 500
+# 	adam_rate = 1e-3
+# 	n_timesteps = 10
+# 	batch_size_per_tp=120
+# 	sequences_per_batch = 8
+# 	lstm_size = 150
+# 	next_state_nn_dim = params["next_state_nn_dim"]
+# 	predictor_nn_dim = params["predictor_nn_dim"]
+# 	init_scale = 0.01
 
-	mut_features, unique_tumours, n_tumours, n_mut, available_tumours, num_features, n_unique_tumours = \
-		load_filter_dataset(mut_dataset_path, feature_path, dataset_with_annotation, region_size, n_tumours, n_mut)
+# 	mut_features, unique_tumours, n_tumours, n_mut, available_tumours, num_features, n_unique_tumours = \
+# 		load_filter_dataset(mut_dataset_path, feature_path, dataset_with_annotation, region_size, n_tumours, n_mut)
 
-	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
-	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut, n_timesteps])
+# 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
+# 	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut, n_timesteps])
 
-	tf_vars, metrics, meta, extra = make_model(n_unique_tumours, z_latent_dim, n_timesteps, batch_size_per_tp, lstm_size, model_save_path, \
-									next_state_nn_dim, predictor_nn_dim, adam_rate = adam_rate, init_scale = init_scale)
+# 	tf_vars, metrics, meta, extra = make_model(n_unique_tumours, z_latent_dim, n_timesteps, batch_size_per_tp, lstm_size, model_save_path, \
+# 									next_state_nn_dim, predictor_nn_dim, adam_rate = adam_rate, init_scale = init_scale)
 
-	tumour_files_train, tumour_files_test = model_selection.train_test_split(available_tumours, test_size=0.2, random_state = 1991)
-	res = train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps)
-	return res
+# 	tumour_files_train, tumour_files_test = model_selection.train_test_split(available_tumours, test_size=0.2, random_state = 1991)
+# 	res = train(tf_vars, metrics, meta, extra, n_epochs, model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps)
+# 	return res
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='Train model to predict probability for region-mutation pair')
@@ -284,6 +322,7 @@ if __name__ == '__main__':
 	parser.add_argument('-rs', '--region-size', help='size of training regions surrounding a mutation', default=100,type=int)
 	parser.add_argument('-a', '--adam', help='Rate for adam optimizer', default=1e-3,type=float)
 	parser.add_argument('-t', '--time-steps', help='number of time steps for RNN. Other time steps are ignored', default=10,type=int)
+	parser.add_argument('-l', '--loss', help='loss type: mse, kl, ce', default="ce")
 
 	args = parser.parse_args()
 	test_mode = args.test
@@ -296,6 +335,7 @@ if __name__ == '__main__':
 	region_size = args.region_size
 	adam_rate = args.adam
 	n_timesteps = args.time_steps
+	loss_type = args.loss
 	#latent_dimension = args.latents
 
 	print("Fitting model version: " + model_type)
@@ -303,7 +343,7 @@ if __name__ == '__main__':
 	# number of mutation per time point batch
 	batch_size_per_tp=120
 	sequences_per_batch = 8
-	n_tumours_per_batch = 100 # tumours in tumour_batch
+	n_tumours_per_batch = 50 # tumours in tumour_batch
 	# size of region latents
 	reg_latent_dim = 80
 	# size of lstm latent state
@@ -317,13 +357,19 @@ if __name__ == '__main__':
 		load_filter_dataset(mut_dataset_path, feature_path, dataset_with_annotation, region_size, n_tumours, n_mut)
 
 	print("Processing {} mutations from {} tumour(s) ...".format(n_mut, n_unique_tumours))
-	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut, n_timesteps])
+	tf.reset_default_graph()
+	model_dir, model_save_path = prepare_model_dir(sys.argv, model_dir, __file__, [n_tumours, n_mut, n_timesteps, loss_type])
+
+	compress_types = False
+	n_mut_types = 96
+	if compress_types:
+		n_mut_types = 6
 
 	tf_vars, metrics, meta, extra = make_model(n_unique_tumours, z_latent_dim, n_timesteps, batch_size_per_tp, lstm_size, model_save_path, \
-									next_state_nn_dim, predictor_nn_dim, init_scale = 0.1, adam_rate = adam_rate)
+									next_state_nn_dim, predictor_nn_dim, n_mut_types, loss_type = loss_type, init_scale = 0.1, adam_rate = adam_rate)
 
 	x, tumour_id, time_estimates, time_series_lengths, sequences_per_batch_tf, predictions = tf_vars
-	mse, likelihood, cost = metrics
+	mse, likelihood, cost, kl_loss = metrics
 	train_step, saver = meta
 
 	# # Split dataset into train / test
@@ -332,18 +378,19 @@ if __name__ == '__main__':
 	if not test_mode:
 		train(tf_vars, metrics, meta, extra, n_epochs , model_save_path, tumour_files_train, tumour_files_test, batch_size_per_tp, sequences_per_batch, n_timesteps)
 	else:
-		if not os.path.exists(model_save_path + ".index"):
-			print("Model folder not found: " + model_save_path)
+		if not os.path.exists(model_dir):
+			print("Model folder not found: " + model_dir)
 			exit()
 
 		with tf.Session() as sess:
+			copyfile(model_save_path + ".data-00000-of-00001", model_save_path)
 			saver.restore(sess, model_save_path)
 
 			training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, annot, features = read_tumour_data(tumour_files_train)
-			x_train, tumours_train, time_estimates_train = make_batches_over_time_type_multinomials(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, n_unique_tumours, n_timesteps)
+			x_train, tumours_train, time_estimates_train = make_batches_over_time_type_multinomials(training_set, labels, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, n_unique_tumours, n_timesteps, compress_types=compress_types)
 
 			test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, annot, features = read_tumour_data(tumour_files_test)
-			x_test, tumours_test, time_estimates_test = make_batches_over_time_type_multinomials(test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, batch_size_per_tp, n_unique_tumours_test, n_timesteps)
+			x_test, tumours_test, time_estimates_test = make_batches_over_time_type_multinomials(test_set, labels_test, n_unique_tumours_test, tumour_ids_test, time_estimates_test, batch_size_per_tp, n_unique_tumours_test, n_timesteps, compress_types=compress_types)
 
 			#print('train cost %g' % evaluate_on_each_tumour(x_train, tumours_train, time_estimates_train,  tf_vars, cost))
 			print('test cost %g' % evaluate_on_each_tumour(x_test, tumours_test, time_estimates_test,  tf_vars, cost))

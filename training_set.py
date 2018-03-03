@@ -349,18 +349,38 @@ def make_batches_over_time(dataset, region_counts, n_unique_tumours, tumour_ids,
 
 	return np.array(all_tumours), tumour_name_batch, np.array(all_time_estimates)
 
-def make_set_for_predicting_mut_rate(training_set, labels, mut_annotation, feature_names):
+def make_set_for_predicting_mut_rate(training_set, labels, mut_vaf, tumour_ids, mut_annotation, feature_names, compress_types=False, compress_features=False):
 	if feature_names[0] != 'C_A_ACA' or feature_names[95] != 'T_G_TTT':
 		print("Warning: mutation types are not the first 96 columns!")
 
 	mut_types = training_set[:,:96]
 	region_features = training_set[:,96:]
-	training_set, labels = region_features, mut_types
 
-	return training_set, labels
+	if compress_types:
+		splitted_types = np.hsplit(mut_types, 6)
+		splitted_types = [np.sum(x, axis=1)[:,np.newaxis] for x in splitted_types]
+		mut_types = np.concatenate(splitted_types, axis=1)
+
+	if compress_features:
+		n_features = len(np.unique(feature_names[96:]))
+		n_samples = region_features.shape[0]
+		region_features = np.mean(np.reshape(region_features, (n_samples, n_features, -1)), axis=2)
+
+	mut_ordering = np.zeros(training_set.shape[0])
+
+	for tum in np.unique(tumour_ids):
+		ind = np.where(tumour_ids == tum)[0]
+		mut_vaf_cur = mut_vaf[ind]
+		mut_vaf_cur = mut_vaf_cur.astype(float)
+		sort_order = mut_vaf_cur.argsort()[::-1]
+		sort_order = sort_order / np.max(sort_order)
+		mut_ordering[ind] = sort_order
+
+	mut_ordering = mut_ordering[:,np.newaxis]
+	return region_features, mut_types, mut_ordering
 
 
-def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, sequences_per_batch, n_timesteps):
+def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tumours, tumour_ids, mut_vaf, batch_size_per_tp, sequences_per_batch, n_timesteps, compress_types = False):
 	# Using only positive examples
 	positive_examples = np.where(region_counts.ravel() > 0)[0]
 	dataset = dataset[positive_examples]
@@ -406,6 +426,12 @@ def make_batches_over_time_type_multinomials(dataset, region_counts, n_unique_tu
 			for i in range(min(n_timesteps,time_steps_in_tumour)):
 				time_estimates.append(np.mean(mut_vaf_cur[i * batch_size_per_tp : (i+1) * batch_size_per_tp]))
 				mut_types = data_cur[i * batch_size_per_tp : (i+1) * batch_size_per_tp,:96]
+
+				if compress_types:
+					splitted_types = np.hsplit(mut_types, 6)
+					splitted_types = [np.sum(x, axis=1)[:,np.newaxis] for x in splitted_types]
+					mut_types = np.concatenate(splitted_types, axis=1)
+		
 				# !!!!! mutation types are no longer frequencies but just counts
 				#mut_types = (np.sum(mut_types, axis =0)/sum(np.sum(mut_types, axis =0)))[np.newaxis,:]
 				tumour_data.append(mut_types)

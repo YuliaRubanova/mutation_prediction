@@ -1,4 +1,4 @@
-import autograd.numpy as np
+import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot
@@ -159,7 +159,7 @@ def plot_tsne(data, labels, label_descr, plot_name):
 	plt.savefig(plot_name)
 
 
-def plot_types_over_time(data, ylabel, plot_name = "tmp.pdf"):
+def plot_types_over_time(data, ylabel, vmax = None, plot_name = "tmp.pdf"):
 	# assuming the following order of dimensions:
 	# 0) time steps 1) tumours 2) types/features
 
@@ -174,7 +174,7 @@ def plot_types_over_time(data, ylabel, plot_name = "tmp.pdf"):
 	
 	for i, tum in enumerate(list(np.transpose(data, (1,0,2)))):
 		ax = ax_list[i]
-		sns.heatmap(np.transpose(tum), cmap="YlGnBu", xticklabels=2, ax = ax)
+		sns.heatmap(np.transpose(tum), cmap="YlGnBu", xticklabels=2, ax = ax, vmax = vmax)
 		ax.set_title('Tumour ' + str(i))
 		ax.set_xlabel('Time')
 		ax.set_ylabel(ylabel)
